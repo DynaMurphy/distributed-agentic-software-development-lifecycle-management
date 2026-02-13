@@ -1,0 +1,27 @@
+{
+  "name": "spec-driven-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP server for accessing spec documents in the database",
+  "main": "build/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "dotenv": "^16.4.5",
+    "pg": "^8.11.3",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "@types/pg": "^8.11.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

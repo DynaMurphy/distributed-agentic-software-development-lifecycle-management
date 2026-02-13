@@ -11,7 +11,7 @@ export const textDocumentHandler = createDocumentHandler<"text">({
     const { fullStream } = streamText({
       model: getArtifactModel(),
       system:
-        "Write about the given topic. Markdown is supported. Use headings wherever appropriate.",
+        "Write about the given topic. Use Markdown formatting with headings (##), bullet points, bold text, and structured sections. Produce well-organized, professional document content suitable for specifications, requirements, or technical documentation.",
       experimental_transform: smoothStream({ chunking: "word" }),
       prompt: title,
     });
@@ -42,14 +42,6 @@ export const textDocumentHandler = createDocumentHandler<"text">({
       system: updateDocumentPrompt(document.content, "text"),
       experimental_transform: smoothStream({ chunking: "word" }),
       prompt: description,
-      providerOptions: {
-        openai: {
-          prediction: {
-            type: "content",
-            content: document.content,
-          },
-        },
-      },
     });
 
     for await (const delta of fullStream) {

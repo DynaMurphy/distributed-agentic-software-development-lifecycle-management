@@ -76,7 +76,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
     }
 
     return (
-      <div className="flex flex-row px-4 py-8 md:p-20">
+      <div className="flex flex-col w-full h-full min-h-[600px]">
         <Editor
           content={content}
           currentVersionIndex={currentVersionIndex}
@@ -85,10 +85,6 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
           status={status}
           suggestions={metadata ? metadata.suggestions : []}
         />
-
-        {metadata?.suggestions && metadata.suggestions.length > 0 ? (
-          <div className="h-dvh w-12 shrink-0 md:hidden" />
-        ) : null}
       </div>
     );
   },

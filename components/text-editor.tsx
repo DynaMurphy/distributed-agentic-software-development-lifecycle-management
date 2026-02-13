@@ -1,27 +1,28 @@
 "use client";
 
-import { exampleSetup } from "prosemirror-example-setup";
-import { inputRules } from "prosemirror-inputrules";
-import { EditorState } from "prosemirror-state";
-import { EditorView } from "prosemirror-view";
-import { memo, useEffect, useRef } from "react";
-
+import dynamic from "next/dynamic";
 import type { Suggestion } from "@/lib/db/schema";
-import {
-  documentSchema,
-  handleTransaction,
-  headingRule,
-} from "@/lib/editor/config";
-import {
-  buildContentFromDocument,
-  buildDocumentFromContent,
-  createDecorations,
-} from "@/lib/editor/functions";
-import {
-  projectWithPositions,
-  suggestionsPlugin,
-  suggestionsPluginKey,
-} from "@/lib/editor/suggestions";
+
+/**
+ * Dynamic import of the Syncfusion editor with SSR disabled.
+ * Syncfusion Document Editor requires browser APIs (DOM, window)
+ * and cannot be rendered on the server.
+ */
+const SyncfusionEditorDynamic = dynamic(
+  () =>
+    import("./syncfusion-editor").then((mod) => mod.SyncfusionEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center w-full h-full min-h-[600px] bg-muted/30 rounded-lg">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+          <span className="text-sm">Loading document editor...</span>
+        </div>
+      </div>
+    ),
+  }
+);
 
 type EditorProps = {
   content: string;
@@ -32,133 +33,13 @@ type EditorProps = {
   suggestions: Suggestion[];
 };
 
-function PureEditor({
-  content,
-  onSaveContent,
-  suggestions,
-  status,
-}: EditorProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const editorRef = useRef<EditorView | null>(null);
-
-  useEffect(() => {
-    if (containerRef.current && !editorRef.current) {
-      const state = EditorState.create({
-        doc: buildDocumentFromContent(content),
-        plugins: [
-          ...exampleSetup({ schema: documentSchema, menuBar: false }),
-          inputRules({
-            rules: [
-              headingRule(1),
-              headingRule(2),
-              headingRule(3),
-              headingRule(4),
-              headingRule(5),
-              headingRule(6),
-            ],
-          }),
-          suggestionsPlugin,
-        ],
-      });
-
-      editorRef.current = new EditorView(containerRef.current, {
-        state,
-      });
-    }
-
-    return () => {
-      if (editorRef.current) {
-        editorRef.current.destroy();
-        editorRef.current = null;
-      }
-    };
-    // NOTE: we only want to run this effect once
-    // eslint-disable-next-line
-  }, [content]);
-
-  useEffect(() => {
-    if (editorRef.current) {
-      editorRef.current.setProps({
-        dispatchTransaction: (transaction) => {
-          handleTransaction({
-            transaction,
-            editorRef,
-            onSaveContent,
-          });
-        },
-      });
-    }
-  }, [onSaveContent]);
-
-  useEffect(() => {
-    if (editorRef.current && content) {
-      const currentContent = buildContentFromDocument(
-        editorRef.current.state.doc
-      );
-
-      if (status === "streaming") {
-        const newDocument = buildDocumentFromContent(content);
-
-        const transaction = editorRef.current.state.tr.replaceWith(
-          0,
-          editorRef.current.state.doc.content.size,
-          newDocument.content
-        );
-
-        transaction.setMeta("no-save", true);
-        editorRef.current.dispatch(transaction);
-        return;
-      }
-
-      if (currentContent !== content) {
-        const newDocument = buildDocumentFromContent(content);
-
-        const transaction = editorRef.current.state.tr.replaceWith(
-          0,
-          editorRef.current.state.doc.content.size,
-          newDocument.content
-        );
-
-        transaction.setMeta("no-save", true);
-        editorRef.current.dispatch(transaction);
-      }
-    }
-  }, [content, status]);
-
-  useEffect(() => {
-    if (editorRef.current?.state.doc && content) {
-      const projectedSuggestions = projectWithPositions(
-        editorRef.current.state.doc,
-        suggestions
-      ).filter(
-        (suggestion) => suggestion.selectionStart && suggestion.selectionEnd
-      );
-
-      const decorations = createDecorations(
-        projectedSuggestions,
-        editorRef.current
-      );
-
-      const transaction = editorRef.current.state.tr;
-      transaction.setMeta(suggestionsPluginKey, { decorations });
-      editorRef.current.dispatch(transaction);
-    }
-  }, [suggestions, content]);
-
-  return (
-    <div className="prose dark:prose-invert relative" ref={containerRef} />
-  );
+/**
+ * The text editor component used by the artifact system.
+ * Wraps SyncfusionEditor with dynamic import (no SSR).
+ *
+ * This component satisfies the same interface as the original
+ * ProseMirror-based Editor component.
+ */
+export function Editor(props: EditorProps) {
+  return <SyncfusionEditorDynamic {...props} />;
 }
-
-function areEqual(prevProps: EditorProps, nextProps: EditorProps) {
-  return (
-    prevProps.suggestions === nextProps.suggestions &&
-    prevProps.currentVersionIndex === nextProps.currentVersionIndex &&
-    prevProps.isCurrentVersion === nextProps.isCurrentVersion &&
-    !(prevProps.status === "streaming" && nextProps.status === "streaming") &&
-    prevProps.content === nextProps.content &&
-    prevProps.onSaveContent === nextProps.onSaveContent
-  );
-}
-
-export const Editor = memo(PureEditor, areEqual);

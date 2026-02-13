@@ -80,6 +80,36 @@ importers:
       '@radix-ui/react-visually-hidden':
         specifier: ^1.1.0
         version: 1.1.2(@types/react-dom@18.3.5(@types/react@18.3.18))(@types/react@18.3.18)(react-dom@19.0.1(react@19.0.1))(react@19.0.1)
+      '@syncfusion/ej2-base':
+        specifier: ^32.2.3
+        version: 32.2.3
+      '@syncfusion/ej2-buttons':
+        specifier: ^32.2.3
+        version: 32.2.3
+      '@syncfusion/ej2-documenteditor':
+        specifier: ^32.2.4
+        version: 32.2.4
+      '@syncfusion/ej2-dropdowns':
+        specifier: ^32.2.4
+        version: 32.2.4
+      '@syncfusion/ej2-inputs':
+        specifier: ^32.2.3
+        version: 32.2.3
+      '@syncfusion/ej2-lists':
+        specifier: ^32.2.3
+        version: 32.2.3
+      '@syncfusion/ej2-navigations':
+        specifier: ^32.2.3
+        version: 32.2.3
+      '@syncfusion/ej2-popups':
+        specifier: ^32.2.4
+        version: 32.2.4
+      '@syncfusion/ej2-react-documenteditor':
+        specifier: ^32.2.4
+        version: 32.2.4
+      '@syncfusion/ej2-splitbuttons':
+        specifier: ^32.2.3
+        version: 32.2.3
       '@vercel/analytics':
         specifier: ^1.3.1
         version: 1.5.0(next@16.0.10(@opentelemetry/api@1.9.0)(@playwright/test@1.51.0)(react-dom@19.0.1(react@19.0.1))(react@19.0.1))(react@19.0.1)
@@ -2202,6 +2232,76 @@ packages:
   '@swc/helpers@0.5.15':
     resolution: {integrity: sha512-JQ5TuMi45Owi4/BIMAJBoSQoOJu12oOk/gADqlcUL9JEdHB8vyjUSsxqeNXnmXHjYKMi2WcYtezGEEhqUI/E2g==}
 
+  '@syncfusion/ej2-base@32.2.3':
+    resolution: {integrity: sha512-0i97KdYCYWAhfLfMbJgRlMzYQQXx8bV6tZxRhY8vAVqzhjZLRQS5Pg7n5nuxQZMtATZdq/03XHZ3tmkhcLa3YQ==}
+    hasBin: true
+
+  '@syncfusion/ej2-buttons@32.2.3':
+    resolution: {integrity: sha512-irIq12umrbJPQA5oZAr1slZ6yOq2sULkVQLFxYHSushFITsRISVP8O5ncvYBIgq0dB1JCKwlGAojEY5d/j0HuA==}
+
+  '@syncfusion/ej2-calendars@32.2.4':
+    resolution: {integrity: sha512-Uiu8ulL+uF4fTQKrgkcgFSLl8RXUA6GxPgoXlO36jxXHNxwY+UoylckeTWBGERteLFKl/SvsEuz3F7gSXI58+Q==}
+
+  '@syncfusion/ej2-charts@32.2.4':
+    resolution: {integrity: sha512-e0hfZJYLeVq+1MtJWKeRFR6300NXmtb+/0SLtKCiZHqFp4aPusi/qhpRuabteVvTlEquKGdul3aeW+U6qqhcgw==}
+
+  '@syncfusion/ej2-compression@32.2.3':
+    resolution: {integrity: sha512-VYSaHfinIoGgiG5EUuWrhh5n/Nw+n19cy1J/dcqVyIXxTSOrS2SOAiMUmyzNg3ZBcPNREJ2xd+xGfHo8i8BpsQ==}
+
+  '@syncfusion/ej2-data@32.2.3':
+    resolution: {integrity: sha512-5m/8v7MLl2m63QNj++oVh/It82pGdB1mL3M8rxTnKni3w5L4tWb78s5LNKEzvz4x8/lcaC3Kg5vnS8ZJqNOI2g==}
+
+  '@syncfusion/ej2-documenteditor@32.2.4':
+    resolution: {integrity: sha512-ncXNEEZPD+M+pNOlzxiwhWDUJ0iTqFdGaIaKlxeHICgnKNMTjRzcIs1TAVwSKRj8WgtF9D36QyOFOTprKLeS2Q==}
+
+  '@syncfusion/ej2-dropdowns@32.2.4':
+    resolution: {integrity: sha512-0j7oanUS1uhBP0zmKMHL0LfMvhVOYcvZa9X4v0U+gys8SvUm0cDSwKth4gEAZ0s+6u/4IpIqhDzKJZQcQ2AArA==}
+
+  '@syncfusion/ej2-excel-export@32.2.3':
+    resolution: {integrity: sha512-UwqXX1vxr1pSaCgwr93TEuujJt65nUUOolo7uAux9xfay1eT6X1Do77yxlqdpFXHbnmXoVmPsYDw4tFGpnFAWA==}
+
+  '@syncfusion/ej2-file-utils@32.2.3':
+    resolution: {integrity: sha512-hxySQtoRAZXxqEYEYc6DeOJyxFxvV3em4o9ss3/o3YZLx6ymDwOS7oyaSCRkVHJF5tHsISB1ULrDSj2dTwhOEw==}
+
+  '@syncfusion/ej2-icons@32.2.3':
+    resolution: {integrity: sha512-bZn+4SWasVNRLB0C1Gt6Z4NAM1MDYIqU/uRlhAPJK9itPAvxo3buQAcrokm+3te6k39vxwFuNlMn0dFoI1zWuw==}
+
+  '@syncfusion/ej2-inputs@32.2.3':
+    resolution: {integrity: sha512-YJm4KuZwTRbtIIwTL2+hs0KFBjz6RDuKBAFZ89tpZlHiZ/xMHsTLzMv5+Yznef69/lPIJWH/4H8GBgWxIe8RDQ==}
+
+  '@syncfusion/ej2-lists@32.2.3':
+    resolution: {integrity: sha512-q/MDTSQn94cBq5aFL8SejO8Pz5Jx2QPSh0hzzygI8OGgjqRYb0Ju4THUGs9PRntYM2J8/5GY9mKN27CgouL07w==}
+
+  '@syncfusion/ej2-navigations@32.2.3':
+    resolution: {integrity: sha512-6+XFEO39j1+2DGjFO45AEjPf+LxFBGfa5QVvXH4S77l36YWx0BbotGHZgqQYeTTf4fnfrtJqK9wsBXWtxx/srw==}
+
+  '@syncfusion/ej2-notifications@32.2.3':
+    resolution: {integrity: sha512-+9RT5ml9JGCcnZ5grbyC6skwL9lIahedDUnS7kcHIiqHNoyJ+SJnp8qzilI4K7AjvdLvnme7LEd5wN4eZVh8UA==}
+
+  '@syncfusion/ej2-office-chart@32.2.3':
+    resolution: {integrity: sha512-EuNOxydemf98/8We9m/rTITqcFT7perBhZpWEqZse1Ox2sypubBAKgGb5uhIWHx8QTz5S3VZlV5rGzY3SCfo1w==}
+
+  '@syncfusion/ej2-pdf-export@32.2.3':
+    resolution: {integrity: sha512-ognKqb7jSUGn9O6+tL9D9ONs7I4ThJYFyqzuU0pYR3ESX7siKuSf7YjV+YdLOxJ7aE9r2TLZYEUARLxUeh6ALg==}
+
+  '@syncfusion/ej2-popups@32.2.4':
+    resolution: {integrity: sha512-2HEOpC3Aav21eMo57cImgfNlw20TxvtcfsEqP6xvlB2f0kJXe24YmeKBP8hAk9TcXHbkvkcCv2mQ/2vM9LIo9A==}
+
+  '@syncfusion/ej2-react-base@32.2.3':
+    resolution: {integrity: sha512-xAh78u1v4QSce/KlDIcZiZmjiGwmEFIjWqFRAqI69YJ8vdfmrrITj9ybZiWYtcDXvsxgWAhOvX6uPE3neI3vqg==}
+
+  '@syncfusion/ej2-react-documenteditor@32.2.4':
+    resolution: {integrity: sha512-PqVA6rJ1vbyX42R3g2CrJok6MnmUzbtg+5wRydrgHADI7Ik2gsRzSDf7dZU+RGwcm2FjKNbbgH+B/B/KcdWzZA==}
+
+  '@syncfusion/ej2-ribbon@32.2.3':
+    resolution: {integrity: sha512-8hgPNQropyEfQcyT8s2ASfaHyK0qEHqcXr3G4FEVuihe9c6Cs2H+QX5+U79jaBQTuMqFlK4DsNrmgKD7ra88JQ==}
+
+  '@syncfusion/ej2-splitbuttons@32.2.3':
+    resolution: {integrity: sha512-u/9Lb/QBxqlNvVa+7U3lThKI9y1Frsdah1e2oEeoAcfVD5Y3henhuH4xvBg6U1kt4RMwwTZSS7RXDQtKJq4hig==}
+
+  '@syncfusion/ej2-svg-base@32.2.3':
+    resolution: {integrity: sha512-3x8AR5I6jORGQyg+fEOwTunkdHc3alPt2nQGXoddqJ71ZgYTag+1PAo176LVJ8a/3cWkIBIEUeEcR/epE+HnrQ==}
+
   '@tailwindcss/node@4.1.16':
     resolution: {integrity: sha512-BX5iaSsloNuvKNHRN3k2RcCuTEgASTo77mofW0vmeHkfrDWaoFAFvNHpEgtu0eqyypcyiBkDWzSMxJhp3AUVcw==}
 
@@ -2460,6 +2560,7 @@ packages:
   '@vercel/postgres@0.10.0':
     resolution: {integrity: sha512-fSD23DxGND40IzSkXjcFcxr53t3Tiym59Is0jSYIFpG4/0f0KO9SGtcp1sXiebvPaGe7N/tU05cH4yt2S6/IPg==}
     engines: {node: '>=18.14'}
+    deprecated: '@vercel/postgres is deprecated. If you are setting up a new database, you can choose an alternate storage solution from the Vercel Marketplace. If you had an existing Vercel Postgres database, it should have been migrated to Neon as a native Vercel integration. You can find more details and the guide to migrate to Neon''s SDKs here: https://neon.com/docs/guides/vercel-postgres-transition-guide'
 
   '@xyflow/react@12.10.0':
     resolution: {integrity: sha512-eOtz3whDMWrB4KWVatIBrKuxECHqip6PfA8fTpaS2RUGVpiEAe+nqDKsLqkViVWxDGreq0lWX71Xth/SPAzXiw==}
@@ -5696,6 +5797,145 @@ snapshots:
   '@swc/helpers@0.5.15':
     dependencies:
       tslib: 2.8.1
+
+  '@syncfusion/ej2-base@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-icons': 32.2.3
+
+  '@syncfusion/ej2-buttons@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+
+  '@syncfusion/ej2-calendars@32.2.4':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-buttons': 32.2.3
+      '@syncfusion/ej2-inputs': 32.2.3
+      '@syncfusion/ej2-lists': 32.2.3
+      '@syncfusion/ej2-popups': 32.2.4
+
+  '@syncfusion/ej2-charts@32.2.4':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-calendars': 32.2.4
+      '@syncfusion/ej2-data': 32.2.3
+      '@syncfusion/ej2-excel-export': 32.2.3
+      '@syncfusion/ej2-navigations': 32.2.3
+      '@syncfusion/ej2-pdf-export': 32.2.3
+      '@syncfusion/ej2-svg-base': 32.2.3
+
+  '@syncfusion/ej2-compression@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-file-utils': 32.2.3
+
+  '@syncfusion/ej2-data@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+
+  '@syncfusion/ej2-documenteditor@32.2.4':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-buttons': 32.2.3
+      '@syncfusion/ej2-calendars': 32.2.4
+      '@syncfusion/ej2-compression': 32.2.3
+      '@syncfusion/ej2-dropdowns': 32.2.4
+      '@syncfusion/ej2-file-utils': 32.2.3
+      '@syncfusion/ej2-inputs': 32.2.3
+      '@syncfusion/ej2-navigations': 32.2.3
+      '@syncfusion/ej2-office-chart': 32.2.3
+      '@syncfusion/ej2-popups': 32.2.4
+      '@syncfusion/ej2-ribbon': 32.2.3
+      '@syncfusion/ej2-splitbuttons': 32.2.3
+
+  '@syncfusion/ej2-dropdowns@32.2.4':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-data': 32.2.3
+      '@syncfusion/ej2-inputs': 32.2.3
+      '@syncfusion/ej2-lists': 32.2.3
+      '@syncfusion/ej2-navigations': 32.2.3
+      '@syncfusion/ej2-notifications': 32.2.3
+      '@syncfusion/ej2-popups': 32.2.4
+
+  '@syncfusion/ej2-excel-export@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-compression': 32.2.3
+
+  '@syncfusion/ej2-file-utils@32.2.3': {}
+
+  '@syncfusion/ej2-icons@32.2.3': {}
+
+  '@syncfusion/ej2-inputs@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-buttons': 32.2.3
+      '@syncfusion/ej2-popups': 32.2.4
+      '@syncfusion/ej2-splitbuttons': 32.2.3
+
+  '@syncfusion/ej2-lists@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-buttons': 32.2.3
+      '@syncfusion/ej2-data': 32.2.3
+      '@syncfusion/ej2-popups': 32.2.4
+
+  '@syncfusion/ej2-navigations@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-buttons': 32.2.3
+      '@syncfusion/ej2-data': 32.2.3
+      '@syncfusion/ej2-inputs': 32.2.3
+      '@syncfusion/ej2-lists': 32.2.3
+      '@syncfusion/ej2-popups': 32.2.4
+
+  '@syncfusion/ej2-notifications@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-buttons': 32.2.3
+      '@syncfusion/ej2-popups': 32.2.4
+
+  '@syncfusion/ej2-office-chart@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-charts': 32.2.4
+
+  '@syncfusion/ej2-pdf-export@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-compression': 32.2.3
+
+  '@syncfusion/ej2-popups@32.2.4':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-buttons': 32.2.3
+
+  '@syncfusion/ej2-react-base@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+
+  '@syncfusion/ej2-react-documenteditor@32.2.4':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-documenteditor': 32.2.4
+      '@syncfusion/ej2-react-base': 32.2.3
+
+  '@syncfusion/ej2-ribbon@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-buttons': 32.2.3
+      '@syncfusion/ej2-dropdowns': 32.2.4
+      '@syncfusion/ej2-lists': 32.2.3
+      '@syncfusion/ej2-navigations': 32.2.3
+      '@syncfusion/ej2-popups': 32.2.4
+      '@syncfusion/ej2-splitbuttons': 32.2.3
+
+  '@syncfusion/ej2-splitbuttons@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
+      '@syncfusion/ej2-popups': 32.2.4
+
+  '@syncfusion/ej2-svg-base@32.2.3':
+    dependencies:
+      '@syncfusion/ej2-base': 32.2.3
 
   '@tailwindcss/node@4.1.16':
     dependencies:
