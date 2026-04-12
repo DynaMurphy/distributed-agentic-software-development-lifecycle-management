@@ -34,6 +34,7 @@ import {
 } from "@/lib/ai/models";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useArtifactSelector, useLiveSpecContent } from "@/hooks/use-artifact";
 import {
   PromptInput,
   PromptInputSubmit,
@@ -86,6 +87,15 @@ function PureMultimodalInput({
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
+
+  // Read live spec content and artifact state for AI context injection
+  const { liveSpecContent } = useLiveSpecContent();
+  const isSpecVisible = useArtifactSelector(
+    useCallback((a) => a.isVisible && a.kind === "spec", [])
+  );
+  const specDocumentId = useArtifactSelector(
+    useCallback((a) => (a.kind === "spec" ? a.documentId : null), [])
+  );
 
   const adjustHeight = useCallback(() => {
     if (textareaRef.current) {
@@ -147,21 +157,43 @@ function PureMultimodalInput({
   const submitForm = useCallback(() => {
     window.history.pushState({}, "", `/chat/${chatId}`);
 
-    sendMessage({
-      role: "user",
-      parts: [
-        ...attachments.map((attachment) => ({
-          type: "file" as const,
-          url: attachment.url,
-          name: attachment.name,
-          mediaType: attachment.contentType,
-        })),
-        {
-          type: "text",
-          text: input,
-        },
-      ],
+    // Build parts array (no SFDT — live spec context goes in the body)
+    const parts: Array<
+      | { type: "file"; url: string; name: string; mediaType: string }
+      | { type: "text"; text: string }
+    > = [
+      ...attachments.map((attachment) => ({
+        type: "file" as const,
+        url: attachment.url,
+        name: attachment.name,
+        mediaType: attachment.contentType,
+      })),
+    ];
+
+    parts.push({
+      type: "text" as const,
+      text: input,
     });
+
+    // When a spec document is open and has live content, send it as a
+    // separate body field so it never appears in the chat bubble or DB.
+    const extraBody =
+      isSpecVisible && liveSpecContent && specDocumentId
+        ? {
+            liveSpecContext: {
+              documentId: specDocumentId,
+              content: liveSpecContent,
+            },
+          }
+        : undefined;
+
+    sendMessage(
+      {
+        role: "user",
+        parts,
+      },
+      extraBody ? { body: extraBody } : undefined,
+    );
 
     setAttachments([]);
     setLocalStorageInput("");
@@ -181,6 +213,9 @@ function PureMultimodalInput({
     width,
     chatId,
     resetHeight,
+    isSpecVisible,
+    liveSpecContent,
+    specDocumentId,
   ]);
 
   const uploadFile = useCallback(async (file: File) => {
@@ -296,7 +331,7 @@ function PureMultimodalInput({
   }, [handlePaste]);
 
   return (
-    <div className={cn("relative flex w-full flex-col gap-4", className)}>
+    <div className={cn("@container relative flex w-full flex-col gap-4", className)}>
       {messages.length === 0 &&
         attachments.length === 0 &&
         uploadQueue.length === 0 && (

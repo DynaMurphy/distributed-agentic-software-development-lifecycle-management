@@ -4,6 +4,7 @@ import {
   deleteDocumentsByIdAfterTimestamp,
   getDocumentsById,
   saveDocument,
+  updateDocumentTitle,
 } from "@/lib/db/queries";
 import { ChatSDKError } from "@/lib/errors";
 
@@ -82,6 +83,59 @@ export async function POST(request: Request) {
   });
 
   return Response.json(document, { status: 200 });
+}
+
+export async function PATCH(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+
+  if (!id) {
+    return new ChatSDKError(
+      "bad_request:api",
+      "Parameter id is required."
+    ).toResponse();
+  }
+
+  const session = await auth();
+
+  if (!session?.user) {
+    return new ChatSDKError("unauthorized:document").toResponse();
+  }
+
+  const { title }: { title: string } = await request.json();
+
+  if (!title || title.trim().length === 0) {
+    return new ChatSDKError(
+      "bad_request:api",
+      "Title must not be empty."
+    ).toResponse();
+  }
+
+  if (title.length > 255) {
+    return new ChatSDKError(
+      "bad_request:api",
+      "Title must not exceed 255 characters."
+    ).toResponse();
+  }
+
+  const documents = await getDocumentsById({ id });
+
+  if (documents.length === 0) {
+    return new ChatSDKError("not_found:document").toResponse();
+  }
+
+  const [doc] = documents;
+
+  if (doc.userId !== session.user.id) {
+    return new ChatSDKError("forbidden:document").toResponse();
+  }
+
+  const updatedDocuments = await updateDocumentTitle({
+    id,
+    title: title.trim(),
+  });
+
+  return Response.json(updatedDocuments, { status: 200 });
 }
 
 export async function DELETE(request: Request) {

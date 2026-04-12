@@ -1,13 +1,11 @@
 "use client";
 
-import { isAfter } from "date-fns";
 import { motion } from "framer-motion";
 import { useState } from "react";
 import { useSWRConfig } from "swr";
 import { useWindowSize } from "usehooks-ts";
 import { useArtifact } from "@/hooks/use-artifact";
 import type { Document } from "@/lib/db/schema";
-import { getDocumentTimestampByIndex } from "@/lib/utils";
 import { LoaderIcon } from "./icons";
 import { Button } from "./ui/button";
 
@@ -34,6 +32,14 @@ export const VersionFooter = ({
     return;
   }
 
+  const viewedDoc = documents[currentVersionIndex];
+  const viewedDate = viewedDoc
+    ? new Date(viewedDoc.createdAt).toLocaleString()
+    : null;
+  const viewedEmail = (viewedDoc as any)?.maintainedByEmail as
+    | string
+    | undefined;
+
   return (
     <motion.div
       animate={{ y: 0 }}
@@ -45,6 +51,13 @@ export const VersionFooter = ({
       <div>
         <div>You are viewing a previous version</div>
         <div className="text-muted-foreground text-sm">
+          {viewedDate && (
+            <span>
+              Last modified: {viewedDate}
+              {viewedEmail && <span> by {viewedEmail}</span>}
+              {" · "}
+            </span>
+          )}
           Restore this version to make edits
         </div>
       </div>
@@ -55,35 +68,40 @@ export const VersionFooter = ({
           onClick={async () => {
             setIsMutating(true);
 
-            mutate(
-              `/api/document?id=${artifact.documentId}`,
-              await fetch(
-                `/api/document?id=${artifact.documentId}&timestamp=${getDocumentTimestampByIndex(
-                  documents,
-                  currentVersionIndex
-                )}`,
-                {
-                  method: "DELETE",
-                }
-              ),
-              {
-                optimisticData: documents
-                  ? [
-                      ...documents.filter((document) =>
-                        isAfter(
-                          new Date(document.createdAt),
-                          new Date(
-                            getDocumentTimestampByIndex(
-                              documents,
-                              currentVersionIndex
-                            )
-                          )
-                        )
-                      ),
-                    ]
-                  : [],
+            const isSpecArtifact = artifact.kind === "spec";
+            const apiBase = isSpecArtifact
+              ? `/api/spec-document`
+              : `/api/document`;
+
+            // Non-destructive restore for ALL artifact types:
+            // Create a new version with the restored content, preserving full history.
+            const restoredDoc = documents?.[currentVersionIndex];
+            if (restoredDoc) {
+              if (isSpecArtifact) {
+                await fetch(`${apiBase}?id=${artifact.documentId}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    title: restoredDoc.title,
+                    content: restoredDoc.content,
+                  }),
+                });
+              } else {
+                await fetch(`${apiBase}?id=${artifact.documentId}`, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    title: restoredDoc.title,
+                    content: restoredDoc.content,
+                    kind: artifact.kind,
+                  }),
+                });
               }
-            );
+              // Revalidate the document list to pick up the new version
+              mutate(`${apiBase}?id=${artifact.documentId}`);
+            }
+
+            setIsMutating(false);
+            handleVersionChange("latest");
           }}
         >
           <div>Restore this version</div>

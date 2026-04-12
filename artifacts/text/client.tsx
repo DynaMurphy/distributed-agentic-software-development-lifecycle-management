@@ -4,39 +4,28 @@ import { DiffView } from "@/components/diffview";
 import { DocumentSkeleton } from "@/components/document-skeleton";
 import {
   ClockRewind,
+  CodeIcon,
   CopyIcon,
+  EyeIcon,
   MessageIcon,
   PenIcon,
   RedoIcon,
   UndoIcon,
 } from "@/components/icons";
 import { Editor } from "@/components/text-editor";
-import type { Suggestion } from "@/lib/db/schema";
-import { getSuggestions } from "../actions";
+import type { EditorMode } from "@/components/text-editor";
 
 type TextArtifactMetadata = {
-  suggestions: Suggestion[];
+  editorMode: EditorMode;
 };
 
 export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
   kind: "text",
   description: "Useful for text content, like drafting essays and emails.",
-  initialize: async ({ documentId, setMetadata }) => {
-    const suggestions = await getSuggestions({ documentId });
-
-    setMetadata({
-      suggestions,
-    });
+  initialize: async ({ setMetadata }) => {
+    setMetadata({ editorMode: "wysiwyg" });
   },
-  onStreamPart: ({ streamPart, setMetadata, setArtifact }) => {
-    if (streamPart.type === "data-suggestion") {
-      setMetadata((metadata) => {
-        return {
-          suggestions: [...metadata.suggestions, streamPart.data],
-        };
-      });
-    }
-
+  onStreamPart: ({ streamPart, setArtifact }) => {
     if (streamPart.type === "data-textDelta") {
       setArtifact((draftArtifact) => {
         return {
@@ -83,12 +72,23 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
           isCurrentVersion={isCurrentVersion}
           onSaveContent={onSaveContent}
           status={status}
-          suggestions={metadata ? metadata.suggestions : []}
+          editorMode={metadata?.editorMode ?? "wysiwyg"}
         />
       </div>
     );
   },
   actions: [
+    {
+      icon: <CodeIcon size={18} />,
+      description: "Toggle raw markdown editor",
+      onClick: ({ metadata, setMetadata }) => {
+        const current = metadata?.editorMode ?? "wysiwyg";
+        setMetadata({
+          ...metadata,
+          editorMode: current === "wysiwyg" ? "markdown" : "wysiwyg",
+        });
+      },
+    },
     {
       icon: <ClockRewind size={18} />,
       description: "View changes",

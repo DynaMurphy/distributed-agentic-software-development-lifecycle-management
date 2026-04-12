@@ -25,12 +25,22 @@ type ArtifactAction<M = any> = {
 
 export type ArtifactToolbarContext = {
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
+  /** The raw content string of the currently open artifact (e.g. JSON for SPLM items) */
+  artifactContent: string;
+  /** The document / item ID of the currently open artifact */
+  artifactId: string;
+  /** The display title of the currently open artifact */
+  artifactTitle: string;
 };
 
 export type ArtifactToolbarItem = {
   description: string;
   icon: ReactNode;
   onClick: (context: ArtifactToolbarContext) => void;
+  /** When true, the tool executes on first click (no select-then-confirm). */
+  immediate?: boolean;
+  /** When true, this tool is only available when the artifact has a valid document/item ID */
+  requiresId?: boolean;
 };
 
 type ArtifactContent<M = any> = {
@@ -52,6 +62,7 @@ type ArtifactContent<M = any> = {
 type InitializeParameters<M = any> = {
   documentId: string;
   setMetadata: Dispatch<SetStateAction<M>>;
+  setArtifact: Dispatch<SetStateAction<UIArtifact>>;
 };
 
 type ArtifactConfig<T extends string, M = any> = {

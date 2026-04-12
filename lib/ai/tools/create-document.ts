@@ -5,6 +5,9 @@ import {
   artifactKinds,
   documentHandlersByArtifactKind,
 } from "@/lib/artifacts/server";
+
+/** Kinds allowed for `createDocument`. Spec documents must be created via `generateSpecFromFeature`. */
+const creatableKinds = artifactKinds.filter((k): k is Exclude<typeof artifactKinds[number], "spec"> => k !== "spec") as unknown as readonly [Exclude<typeof artifactKinds[number], "spec">, ...Exclude<typeof artifactKinds[number], "spec">[]];
 import type { ChatMessage } from "@/lib/types";
 import { generateUUID } from "@/lib/utils";
 
@@ -16,10 +19,10 @@ type CreateDocumentProps = {
 export const createDocument = ({ session, dataStream }: CreateDocumentProps) =>
   tool({
     description:
-      "Create a document for a writing or content creation activities. This tool will call other functions that will generate the contents of the document based on the title and kind.",
+      "Create a document for writing or content creation activities. This tool will call other functions that will generate the contents of the document based on the title and kind. NEVER use this for specification documents — specs must be created from backlog items via generateSpecFromFeature. If a document is already open, use updateDocument, editSpec, or updateSpec instead.",
     inputSchema: z.object({
       title: z.string(),
-      kind: z.enum(artifactKinds),
+      kind: z.enum(creatableKinds),
     }),
     execute: async ({ title, kind }) => {
       const id = generateUUID();

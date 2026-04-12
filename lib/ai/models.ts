@@ -11,22 +11,41 @@ export type ChatModel = {
 export const chatModels: ChatModel[] = [
   // Anthropic
   {
-    id: "anthropic/claude-haiku-4.5",
+    id: "anthropic/claude-haiku-4-5",
     name: "Claude Haiku 4.5",
     provider: "anthropic",
     description: "Fast and affordable, great for everyday tasks",
   },
   {
-    id: "anthropic/claude-sonnet-4.5",
+    id: "anthropic/claude-sonnet-4-5",
     name: "Claude Sonnet 4.5",
     provider: "anthropic",
     description: "Best balance of speed, intelligence, and cost",
   },
   {
-    id: "anthropic/claude-opus-4.5",
+    id: "anthropic/claude-opus-4-5",
     name: "Claude Opus 4.5",
     provider: "anthropic",
     description: "Most capable Anthropic model",
+  },
+  // OpenAI
+  {
+    id: "openai/gpt-4.1-mini",
+    name: "GPT-4.1 Mini",
+    provider: "openai",
+    description: "Fast and affordable, great for everyday tasks",
+  },
+  {
+    id: "openai/gpt-4.1",
+    name: "GPT-4.1",
+    provider: "openai",
+    description: "Flagship OpenAI model, excellent at coding and instruction following",
+  },
+  {
+    id: "openai/o3-mini",
+    name: "o3-mini",
+    provider: "openai",
+    description: "Fast reasoning model optimized for STEM and code",
   },
   // Google
   {
@@ -50,7 +69,7 @@ export const chatModels: ChatModel[] = [
   },
   // Reasoning models (extended thinking)
   {
-    id: "anthropic/claude-3.7-sonnet-thinking",
+    id: "anthropic/claude-3-7-sonnet-thinking",
     name: "Claude 3.7 Sonnet",
     provider: "reasoning",
     description: "Extended thinking for complex problems",

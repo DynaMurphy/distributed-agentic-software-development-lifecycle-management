@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const textPartSchema = z.object({
   type: z.enum(["text"]),
-  text: z.string().min(1).max(2000),
+  text: z.string().min(1).max(10000),
 });
 
 const filePartSchema = z.object({
@@ -27,6 +27,13 @@ const messageSchema = z.object({
   parts: z.array(z.any()),
 });
 
+const liveSpecContextSchema = z
+  .object({
+    documentId: z.string(),
+    content: z.string(),
+  })
+  .optional();
+
 export const postRequestBodySchema = z.object({
   id: z.string().uuid(),
   // Either a single new message or all messages (for tool approvals)
@@ -34,6 +41,8 @@ export const postRequestBodySchema = z.object({
   messages: z.array(messageSchema).optional(),
   selectedChatModel: z.string(),
   selectedVisibilityType: z.enum(["public", "private"]),
+  /** Live SFDT from the editor — sent separately to avoid bloating messages */
+  liveSpecContext: liveSpecContextSchema,
 });
 
 export type PostRequestBody = z.infer<typeof postRequestBodySchema>;

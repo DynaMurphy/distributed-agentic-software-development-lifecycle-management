@@ -38,11 +38,17 @@ type ToolProps = {
   setIsToolbarVisible?: Dispatch<SetStateAction<boolean>>;
   isAnimating: boolean;
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
-  onClick: ({
-    sendMessage,
-  }: {
+  onClick: (context: {
     sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
+    artifactContent: string;
+    artifactId: string;
+    artifactTitle: string;
   }) => void;
+  /** When true, execute on first click without requiring a second confirm click */
+  immediate?: boolean;
+  artifactContent: string;
+  artifactId: string;
+  artifactTitle: string;
 };
 
 const Tool = ({
@@ -55,6 +61,10 @@ const Tool = ({
   isAnimating,
   sendMessage,
   onClick,
+  immediate,
+  artifactContent,
+  artifactId,
+  artifactTitle,
 }: ToolProps) => {
   const [isHovered, setIsHovered] = useState(false);
 
@@ -70,6 +80,14 @@ const Tool = ({
       return;
     }
 
+    // Immediate tools execute on first click (no select-then-confirm)
+    if (immediate) {
+      console.log(`[Toolbar] Immediate execute: "${description}"`);
+      setSelectedTool(null);
+      onClick({ sendMessage, artifactContent, artifactId, artifactTitle });
+      return;
+    }
+
     if (!selectedTool) {
       setIsHovered(true);
       setSelectedTool(description);
@@ -80,7 +98,7 @@ const Tool = ({
       setSelectedTool(description);
     } else {
       setSelectedTool(null);
-      onClick({ sendMessage });
+      onClick({ sendMessage, artifactContent, artifactId, artifactTitle });
     }
   };
 
@@ -252,6 +270,9 @@ export const Tools = ({
   isAnimating,
   setIsToolbarVisible,
   tools,
+  artifactContent,
+  artifactId,
+  artifactTitle,
 }: {
   isToolbarVisible: boolean;
   selectedTool: string | null;
@@ -260,6 +281,9 @@ export const Tools = ({
   isAnimating: boolean;
   setIsToolbarVisible: Dispatch<SetStateAction<boolean>>;
   tools: ArtifactToolbarItem[];
+  artifactContent: string;
+  artifactId: string;
+  artifactTitle: string;
 }) => {
   const [primaryTool, ...secondaryTools] = tools;
 
@@ -274,8 +298,12 @@ export const Tools = ({
         {isToolbarVisible &&
           secondaryTools.map((secondaryTool) => (
             <Tool
+              artifactContent={artifactContent}
+              artifactId={artifactId}
+              artifactTitle={artifactTitle}
               description={secondaryTool.description}
               icon={secondaryTool.icon}
+              immediate={secondaryTool.immediate}
               isAnimating={isAnimating}
               key={secondaryTool.description}
               onClick={secondaryTool.onClick}
@@ -287,8 +315,12 @@ export const Tools = ({
       </AnimatePresence>
 
       <Tool
+        artifactContent={artifactContent}
+        artifactId={artifactId}
+        artifactTitle={artifactTitle}
         description={primaryTool.description}
         icon={primaryTool.icon}
+        immediate={primaryTool.immediate}
         isAnimating={isAnimating}
         isToolbarVisible={isToolbarVisible}
         onClick={primaryTool.onClick}
@@ -309,6 +341,9 @@ const PureToolbar = ({
   stop,
   setMessages,
   artifactKind,
+  artifactContent,
+  artifactId,
+  artifactTitle,
 }: {
   isToolbarVisible: boolean;
   setIsToolbarVisible: Dispatch<SetStateAction<boolean>>;
@@ -317,6 +352,9 @@ const PureToolbar = ({
   stop: UseChatHelpers<ChatMessage>["stop"];
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
   artifactKind: ArtifactKind;
+  artifactContent: string;
+  artifactId: string;
+  artifactTitle: string;
 }) => {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -446,6 +484,9 @@ const PureToolbar = ({
           />
         ) : (
           <Tools
+            artifactContent={artifactContent}
+            artifactId={artifactId}
+            artifactTitle={artifactTitle}
             isAnimating={isAnimating}
             isToolbarVisible={isToolbarVisible}
             key="tools"
@@ -469,6 +510,12 @@ export const Toolbar = memo(PureToolbar, (prevProps, nextProps) => {
     return false;
   }
   if (prevProps.artifactKind !== nextProps.artifactKind) {
+    return false;
+  }
+  if (prevProps.artifactId !== nextProps.artifactId) {
+    return false;
+  }
+  if (prevProps.artifactContent !== nextProps.artifactContent) {
     return false;
   }
 

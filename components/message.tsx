@@ -16,12 +16,64 @@ import {
   ToolInput,
   ToolOutput,
 } from "./elements/tool";
-import { SparklesIcon } from "./icons";
+import { LoaderIcon, SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { MessageEditor } from "./message-editor";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
+import { SplmToolResult } from "./splm-tool-result";
+import {
+  TriageResult,
+  DuplicateResult,
+  ImpactResult,
+  SuggestLinksResult,
+  GenerateSpecResult,
+} from "./ai-tool-results";
 import { Weather } from "./weather";
+
+/** Tool types that open an artifact and return { id, title, kind }. */
+const splmArtifactTools = new Set([
+  "tool-createFeature",
+  "tool-getFeature",
+  "tool-updateFeature",
+  "tool-createBug",
+  "tool-getBug",
+  "tool-updateBug",
+  "tool-openSpec",
+  "tool-updateSpec",
+  "tool-editSpec",
+  "tool-readSpec",
+]);
+
+const splmToolAction: Record<string, "create" | "open" | "update"> = {
+  "tool-createFeature": "create",
+  "tool-getFeature": "open",
+  "tool-updateFeature": "update",
+  "tool-createBug": "create",
+  "tool-getBug": "open",
+  "tool-updateBug": "update",
+  "tool-openSpec": "open",
+  "tool-updateSpec": "update",
+  "tool-editSpec": "update",
+  "tool-readSpec": "open",
+};
+
+/** AI-powered SPLM tools that get dedicated rich renderers */
+const splmAITools = new Set([
+  "tool-triageItem",
+  "tool-detectDuplicates",
+  "tool-analyzeImpact",
+  "tool-suggestDocumentLinks",
+  "tool-generateSpecFromFeature",
+]);
+
+const aiToolLoadingLabels: Record<string, string> = {
+  "tool-triageItem": "Running triage analysis…",
+  "tool-detectDuplicates": "Checking for duplicates…",
+  "tool-analyzeImpact": "Analyzing impact…",
+  "tool-suggestDocumentLinks": "Finding relevant documents…",
+  "tool-generateSpecFromFeature": "Generating specification…",
+};
 
 const PurePreviewMessage = ({
   addToolApprovalResponse,
@@ -305,6 +357,126 @@ const PurePreviewMessage = ({
                     isReadonly={isReadonly}
                     result={part.output}
                   />
+                </div>
+              );
+            }
+
+            // --- SPLM artifact tools (feature, bug) ---
+            if (splmArtifactTools.has(type)) {
+              const toolPart = part as Extract<typeof part, { toolCallId: string; state: string }>;
+              const { toolCallId, state } = toolPart;
+
+              if (state === "output-available") {
+                const output = (toolPart as any).output;
+                if (output && "error" in output) {
+                  return (
+                    <div
+                      className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-500 dark:bg-red-950/50"
+                      key={toolCallId}
+                    >
+                      Error: {String(output.error)}
+                    </div>
+                  );
+                }
+
+                return (
+                  <SplmToolResult
+                    isReadonly={isReadonly}
+                    key={toolCallId}
+                    result={output}
+                    type={splmToolAction[type] ?? "open"}
+                  />
+                );
+              }
+
+              // While tool is running, show a brief loading indicator
+              return (
+                <div
+                  className="flex w-fit items-center gap-2 rounded-xl border px-3 py-2 text-muted-foreground text-sm"
+                  key={toolCallId}
+                >
+                  <div className="animate-spin">
+                    <LoaderIcon />
+                  </div>
+                  <span>{type.replace("tool-", "").replace(/([A-Z])/g, " $1").trim()}…</span>
+                </div>
+              );
+            }
+
+            // --- Backlog tool ---
+            if (type === "tool-viewBacklog") {
+              const toolPart = part as Extract<typeof part, { toolCallId: string; state: string }>;
+              const { toolCallId, state } = toolPart;
+
+              if (state === "output-available") {
+                return (
+                  <SplmToolResult
+                    isReadonly={isReadonly}
+                    key={toolCallId}
+                    result={{ id: "backlog-view", title: "Product Backlog", kind: "backlog" }}
+                    type="open"
+                  />
+                );
+              }
+
+              return (
+                <div
+                  className="flex w-fit items-center gap-2 rounded-xl border px-3 py-2 text-muted-foreground text-sm"
+                  key={toolCallId}
+                >
+                  <div className="animate-spin">
+                    <LoaderIcon />
+                  </div>
+                  <span>Loading backlog…</span>
+                </div>
+              );
+            }
+
+            // --- AI-powered SPLM tools ---
+            if (splmAITools.has(type)) {
+              const toolPart = part as Extract<typeof part, { toolCallId: string; state: string }>;
+              const { toolCallId, state } = toolPart;
+
+              if (state === "output-available") {
+                const output = (toolPart as any).output;
+                if (output && "error" in output) {
+                  return (
+                    <div
+                      className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-500 dark:bg-red-950/50"
+                      key={toolCallId}
+                    >
+                      Error: {String(output.error)}
+                    </div>
+                  );
+                }
+
+                if (type === "tool-triageItem") {
+                  return <TriageResult isReadonly={isReadonly} key={toolCallId} output={output} />;
+                }
+                if (type === "tool-detectDuplicates") {
+                  return <DuplicateResult isReadonly={isReadonly} key={toolCallId} output={output} />;
+                }
+                if (type === "tool-analyzeImpact") {
+                  return <ImpactResult isReadonly={isReadonly} key={toolCallId} output={output} />;
+                }
+                if (type === "tool-suggestDocumentLinks") {
+                  return <SuggestLinksResult isReadonly={isReadonly} key={toolCallId} output={output} />;
+                }
+                if (type === "tool-generateSpecFromFeature") {
+                  return <GenerateSpecResult isReadonly={isReadonly} key={toolCallId} output={output} />;
+                }
+              }
+
+              // Loading state for AI tools
+              return (
+                <div
+                  className="flex w-fit items-center gap-2 rounded-xl border px-3 py-2 text-muted-foreground text-sm"
+                  key={toolCallId}
+                >
+                  <div className="animate-spin">
+                    <LoaderIcon />
+                  </div>
+                  <span>{aiToolLoadingLabels[type] ?? "Running AI analysis…"}</span>
                 </div>
               );
             }

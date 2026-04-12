@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "splm": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp-server/build/index.js"],
+      "env": {
+        "MCP_ASSISTANT_USER_ID": "e5fc2085-e47c-42fa-bdae-f49e518ce1bf",
+        "POSTGRES_URL": "postgresql://Murphy:@localhost:5432/spec_docs"
+      }
+    }
+  }
+}

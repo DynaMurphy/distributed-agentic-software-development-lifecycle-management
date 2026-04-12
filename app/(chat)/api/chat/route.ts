@@ -16,7 +16,37 @@ import { getLanguageModel } from "@/lib/ai/providers";
 import { createDocument } from "@/lib/ai/tools/create-document";
 import { getWeather } from "@/lib/ai/tools/get-weather";
 import { requestSuggestions } from "@/lib/ai/tools/request-suggestions";
+import { listSpecs, openSpec, updateSpec, editSpec, readSpec } from "@/lib/ai/tools/spec-document";
 import { updateDocument } from "@/lib/ai/tools/update-document";
+import {
+  listFeatures,
+  createFeature,
+  updateFeature,
+  getFeature,
+} from "@/lib/ai/tools/feature-management";
+import {
+  listBugsAI,
+  createBugAI,
+  updateBugAI,
+  getBugAI,
+} from "@/lib/ai/tools/bug-management";
+import {
+  listTasksAI,
+  createTaskAI,
+  updateTaskAI,
+} from "@/lib/ai/tools/task-management";
+import {
+  viewBacklog,
+  promoteToBacklogAI,
+  triageItem,
+  detectDuplicates,
+  analyzeImpact,
+} from "@/lib/ai/tools/backlog-management";
+import {
+  linkDocumentAI,
+  suggestDocumentLinks,
+} from "@/lib/ai/tools/document-linking";
+import { generateSpecFromFeature } from "@/lib/ai/tools/generate-spec-from-feature";
 import { isProductionEnvironment } from "@/lib/constants";
 import {
   createStreamId,
@@ -59,7 +89,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { id, message, messages, selectedChatModel, selectedVisibilityType } =
+    const { id, message, messages, selectedChatModel, selectedVisibilityType, liveSpecContext: liveSpecBody } =
       requestBody;
 
     const session = await auth();
@@ -136,12 +166,32 @@ export async function POST(request: Request) {
 
     const modelMessages = await convertToModelMessages(uiMessages);
 
+    // Extract live spec context from the request body (sent separately from message parts)
+    let liveSpecContent: string | null = null;
+    let liveSpecDocumentId: string | null = null;
+    let liveSpecMarkdown: string | null = null;
+
+    if (liveSpecBody) {
+      liveSpecDocumentId = liveSpecBody.documentId;
+      liveSpecContent = liveSpecBody.content;
+      // Content is already markdown — no conversion needed
+      liveSpecMarkdown = liveSpecContent;
+    }
+
+    // Build spec-aware system prompt supplement
+    const isSpecEmpty = !liveSpecMarkdown || liveSpecMarkdown.trim().length === 0;
+    const liveDocumentContext = liveSpecDocumentId
+      ? isSpecEmpty
+        ? `\n\n**Currently Open Specification Document (ID: ${liveSpecDocumentId}):**\nThe user has a specification document open but it is EMPTY — it has no content yet.\n\nIMPORTANT:\n- Do NOT use \`createDocument\` — a document is already open.\n- Do NOT use \`editSpec\` — the document is empty so there is nothing to find and replace.\n- Use \`updateSpec\` with the document ID \`${liveSpecDocumentId}\` to write initial content for this document.\n`
+        : `\n\n**Currently Open Specification Document (ID: ${liveSpecDocumentId}):**\nThe user is currently editing a specification document in the editor. Below is its current content (including any unsaved edits). Refer to this when discussing or editing the document.\n\nIMPORTANT: Do NOT use \`createDocument\` — a document is already open. Use \`editSpec\` for targeted changes, \`updateSpec\` for major rewrites, or \`readSpec\` to get a fresh view of the content.\n\n---\n${liveSpecMarkdown}\n---\n`
+      : "";
+
     const stream = createUIMessageStream({
       originalMessages: isToolApprovalFlow ? uiMessages : undefined,
       execute: async ({ writer: dataStream }) => {
         const result = streamText({
           model: getLanguageModel(selectedChatModel),
-          system: systemPrompt({ selectedChatModel, requestHints }),
+          system: systemPrompt({ selectedChatModel, requestHints }) + liveDocumentContext,
           messages: modelMessages,
           stopWhen: stepCountIs(5),
           experimental_activeTools: isReasoningModel
@@ -151,6 +201,31 @@ export async function POST(request: Request) {
                 "createDocument",
                 "updateDocument",
                 "requestSuggestions",
+                "listSpecs",
+                "openSpec",
+                "updateSpec",
+                "editSpec",
+                "readSpec",
+                // SPLM tools
+                "listFeatures",
+                "createFeature",
+                "updateFeature",
+                "getFeature",
+                "listBugs",
+                "createBug",
+                "updateBug",
+                "getBug",
+                "listTasks",
+                "createTask",
+                "updateTask",
+                "viewBacklog",
+                "promoteToBacklog",
+                "triageItem",
+                "detectDuplicates",
+                "analyzeImpact",
+                "linkDocument",
+                "suggestDocumentLinks",
+                "generateSpecFromFeature",
               ],
           providerOptions: isReasoningModel
             ? {
@@ -164,6 +239,31 @@ export async function POST(request: Request) {
             createDocument: createDocument({ session, dataStream }),
             updateDocument: updateDocument({ session, dataStream }),
             requestSuggestions: requestSuggestions({ session, dataStream }),
+            listSpecs: listSpecs({ session, dataStream }),
+            openSpec: openSpec({ session, dataStream }),
+            updateSpec: updateSpec({ session, dataStream, liveSpecContent, liveSpecDocumentId }),
+            editSpec: editSpec({ session, dataStream, liveSpecContent, liveSpecDocumentId }),
+            readSpec: readSpec({ session, dataStream, liveSpecContent, liveSpecDocumentId }),
+            // SPLM tools
+            listFeatures: listFeatures({ session, dataStream }),
+            createFeature: createFeature({ session, dataStream }),
+            updateFeature: updateFeature({ session, dataStream }),
+            getFeature: getFeature({ session, dataStream }),
+            listBugs: listBugsAI({ session, dataStream }),
+            createBug: createBugAI({ session, dataStream }),
+            updateBug: updateBugAI({ session, dataStream }),
+            getBug: getBugAI({ session, dataStream }),
+            listTasks: listTasksAI({ session, dataStream }),
+            createTask: createTaskAI({ session, dataStream }),
+            updateTask: updateTaskAI({ session, dataStream }),
+            viewBacklog: viewBacklog({ session, dataStream }),
+            promoteToBacklog: promoteToBacklogAI({ session, dataStream }),
+            triageItem: triageItem({ session, dataStream }),
+            detectDuplicates: detectDuplicates({ session, dataStream }),
+            analyzeImpact: analyzeImpact({ session, dataStream }),
+            linkDocument: linkDocumentAI({ session, dataStream }),
+            suggestDocumentLinks: suggestDocumentLinks({ session, dataStream }),
+            generateSpecFromFeature: generateSpecFromFeature({ session, dataStream }),
           },
           experimental_telemetry: {
             isEnabled: isProductionEnvironment,

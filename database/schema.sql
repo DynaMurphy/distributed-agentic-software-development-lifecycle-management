@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS documents (
     version_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Surrogate key for each version
     title VARCHAR(255) NOT NULL,
     content TEXT, -- Storing SFDT (rich text) or relevant content
+    maintained_by UUID REFERENCES "User"(id),
     valid_from TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, -- When this version became valid in the real world
     valid_to TIMESTAMP WITH TIME ZONE DEFAULT 'infinity' -- When this version ceased to be valid (infinity if current)
 );
@@ -20,7 +21,7 @@ SELECT periods.add_unique_key('documents', ARRAY['id'], 'validity');
 
 -- Create a view for current documents (latest transaction time)
 CREATE OR REPLACE VIEW current_documents AS
-SELECT id, title, content, valid_from, valid_to
+SELECT id, title, content, maintained_by, valid_from, valid_to
 FROM documents
 WHERE transaction_to = 'infinity';
 
@@ -29,15 +30,16 @@ CREATE OR REPLACE FUNCTION insert_document_version(
     p_id UUID,
     p_title VARCHAR(255),
     p_content TEXT,
-    p_valid_from TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    p_valid_from TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    p_maintained_by UUID DEFAULT NULL
 ) RETURNS UUID AS $$
 DECLARE
     new_version_id UUID;
 BEGIN
     -- For new documents (no existing versions), just insert
     -- For updates, the periods extension will handle closing the previous transaction period
-    INSERT INTO documents (id, title, content, valid_from, valid_to, transaction_from, transaction_to)
-    VALUES (p_id, p_title, p_content, p_valid_from, 'infinity', p_valid_from, 'infinity')
+    INSERT INTO documents (id, title, content, maintained_by, valid_from, valid_to, transaction_from, transaction_to)
+    VALUES (p_id, p_title, p_content, p_maintained_by, p_valid_from, 'infinity', p_valid_from, 'infinity')
     RETURNING version_id INTO new_version_id;
 
     RETURN new_version_id;
@@ -49,15 +51,16 @@ CREATE OR REPLACE FUNCTION update_document_version(
     p_id UUID,
     p_title VARCHAR(255) DEFAULT NULL,
     p_content TEXT DEFAULT NULL,
-    p_valid_from TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    p_valid_from TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    p_maintained_by UUID DEFAULT NULL
 ) RETURNS UUID AS $$
 DECLARE
     current_version_id UUID;
     update_timestamp TIMESTAMP WITH TIME ZONE;
     new_version_id UUID;
 BEGIN
-    -- Use a consistent timestamp for this update
-    update_timestamp := p_valid_from;
+    -- Use a consistent timestamp for this update (COALESCE handles explicit NULL from callers)
+    update_timestamp := COALESCE(p_valid_from, CURRENT_TIMESTAMP);
 
     -- Get current version
     SELECT version_id INTO current_version_id
@@ -68,7 +71,7 @@ BEGIN
 
     IF current_version_id IS NULL THEN
         -- No existing document, insert new one
-        SELECT insert_document_version(p_id, p_title, p_content, update_timestamp) INTO new_version_id;
+        SELECT insert_document_version(p_id, p_title, p_content, update_timestamp, p_maintained_by) INTO new_version_id;
         RETURN new_version_id;
     END IF;
 
@@ -85,8 +88,8 @@ BEGIN
     WHERE version_id = current_version_id AND valid_to = 'infinity';
 
     -- Insert new version starting from the update time
-    INSERT INTO documents (id, title, content, valid_from, valid_to, transaction_from, transaction_to)
-    VALUES (p_id, p_title, p_content, update_timestamp, 'infinity', update_timestamp, 'infinity')
+    INSERT INTO documents (id, title, content, maintained_by, valid_from, valid_to, transaction_from, transaction_to)
+    VALUES (p_id, p_title, p_content, p_maintained_by, update_timestamp, 'infinity', update_timestamp, 'infinity')
     RETURNING version_id INTO new_version_id;
 
     RETURN new_version_id;

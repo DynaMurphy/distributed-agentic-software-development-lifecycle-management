@@ -12,6 +12,7 @@ import {
   getChatHistoryPaginationKey,
   SidebarHistory,
 } from "@/components/sidebar-history";
+import { SidebarSPLM } from "@/components/sidebar-splm";
 import { SidebarUserNav } from "@/components/sidebar-user-nav";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +21,7 @@ import {
   SidebarFooter,
   SidebarHeader,
   SidebarMenu,
+  SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
 import {
@@ -61,6 +63,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
   return (
     <>
       <Sidebar className="group-data-[side=left]:border-r-0">
+        <SidebarRail />
         <SidebarHeader>
           <SidebarMenu>
             <div className="flex flex-row items-center justify-between">
@@ -72,7 +75,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                 }}
               >
                 <span className="cursor-pointer rounded-md px-2 font-semibold text-lg hover:bg-muted">
-                  Chatbot
+                  Assistant
                 </span>
               </Link>
               <div className="flex flex-row gap-1">
@@ -117,6 +120,7 @@ export function AppSidebar({ user }: { user: User | undefined }) {
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
+          <SidebarSPLM />
           <SidebarHistory user={user} />
         </SidebarContent>
         <SidebarFooter>{user && <SidebarUserNav user={user} />}</SidebarFooter>

@@ -50,6 +50,11 @@ export const {
 
         const [user] = users;
 
+        // System users (Chat Assistant, MCP Assistant) cannot log in
+        if (user.systemUser) {
+          return null;
+        }
+
         if (!user.password) {
           await compare(password, DUMMY_PASSWORD);
           return null;

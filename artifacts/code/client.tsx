@@ -6,7 +6,9 @@ import {
   type ConsoleOutputContent,
 } from "@/components/console";
 import { Artifact } from "@/components/create-artifact";
+import { DiffView } from "@/components/diffview";
 import {
+  ClockRewind,
   CopyIcon,
   LogsIcon,
   MessageIcon,
@@ -90,11 +92,17 @@ export const codeArtifact = new Artifact<"code", Metadata>({
       }));
     }
   },
-  content: ({ metadata, setMetadata, ...props }) => {
+  content: ({ metadata, setMetadata, mode, currentVersionIndex, getDocumentContentById, ...props }) => {
+    if (mode === "diff") {
+      const oldContent = getDocumentContentById(currentVersionIndex - 1);
+      const newContent = getDocumentContentById(currentVersionIndex);
+      return <DiffView newContent={newContent} oldContent={oldContent} />;
+    }
+
     return (
       <>
         <div className="px-1">
-          <CodeEditor {...props} />
+          <CodeEditor {...props} currentVersionIndex={currentVersionIndex} />
         </div>
 
         {metadata?.outputs && (
@@ -206,6 +214,19 @@ export const codeArtifact = new Artifact<"code", Metadata>({
             ],
           }));
         }
+      },
+    },
+    {
+      icon: <ClockRewind size={18} />,
+      description: "View changes",
+      onClick: ({ handleVersionChange }) => {
+        handleVersionChange("toggle");
+      },
+      isDisabled: ({ currentVersionIndex }) => {
+        if (currentVersionIndex === 0) {
+          return true;
+        }
+        return false;
       },
     },
     {

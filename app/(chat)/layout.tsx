@@ -25,9 +25,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 async function SidebarWrapper({ children }: { children: React.ReactNode }) {
   const [session, cookieStore] = await Promise.all([auth(), cookies()]);
   const isCollapsed = cookieStore.get("sidebar_state")?.value !== "true";
+  const savedWidth = cookieStore.get("sidebar_width")?.value;
 
   return (
-    <SidebarProvider defaultOpen={!isCollapsed}>
+    <SidebarProvider
+      defaultOpen={!isCollapsed}
+      {...(savedWidth ? { defaultWidth: savedWidth } : {})}
+    >
       <AppSidebar user={session?.user} />
       <SidebarInset>{children}</SidebarInset>
     </SidebarProvider>

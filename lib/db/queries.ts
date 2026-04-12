@@ -385,6 +385,27 @@ export async function getDocumentById({ id }: { id: string }) {
   }
 }
 
+export async function updateDocumentTitle({
+  id,
+  title,
+}: {
+  id: string;
+  title: string;
+}) {
+  try {
+    return await db
+      .update(document)
+      .set({ title })
+      .where(eq(document.id, id))
+      .returning();
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to update document title"
+    );
+  }
+}
+
 export async function deleteDocumentsByIdAfterTimestamp({
   id,
   timestamp,

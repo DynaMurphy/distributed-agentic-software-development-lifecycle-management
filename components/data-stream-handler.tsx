@@ -22,15 +22,25 @@ export function DataStreamHandler() {
     const newDeltas = dataStream.slice();
     setDataStream([]);
 
+    // Track kind locally so that when data-kind and data-*Delta arrive
+    // in the same batch, we look up the correct artifact definition.
+    let currentKind = artifact.kind;
+
     for (const delta of newDeltas) {
       // Handle chat title updates
       if (delta.type === "data-chat-title") {
         mutate(unstable_serialize(getChatHistoryPaginationKey));
         continue;
       }
+
+      // Update local kind tracker before the definition lookup
+      if (delta.type === "data-kind") {
+        currentKind = delta.data;
+      }
+
       const artifactDefinition = artifactDefinitions.find(
         (currentArtifactDefinition) =>
-          currentArtifactDefinition.kind === artifact.kind
+          currentArtifactDefinition.kind === currentKind
       );
 
       if (artifactDefinition?.onStreamPart) {

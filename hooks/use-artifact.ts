@@ -19,6 +19,38 @@ export const initialArtifactData: UIArtifact = {
   },
 };
 
+/**
+ * SWR key for storing the live markdown content from the spec editor.
+ * This allows the chat input to read the current editor state (including unsaved edits)
+ * and send it alongside user messages so the AI always sees the latest document content.
+ */
+const LIVE_SPEC_CONTENT_KEY = "live-spec-content";
+
+/**
+ * Hook to access and update the live spec editor content.
+ * The spec editor writes to this on every content change.
+ * The chat input reads from this to attach live content to outgoing messages.
+ */
+export function useLiveSpecContent() {
+  const { data: liveContent, mutate: setLiveContent } = useSWR<string | null>(
+    LIVE_SPEC_CONTENT_KEY,
+    null,
+    { fallbackData: null }
+  );
+
+  const updateLiveContent = useCallback(
+    (content: string | null) => {
+      setLiveContent(content, { revalidate: false });
+    },
+    [setLiveContent]
+  );
+
+  return {
+    liveSpecContent: liveContent ?? null,
+    setLiveSpecContent: updateLiveContent,
+  };
+}
+
 type Selector<T> = (state: UIArtifact) => T;
 
 export function useArtifactSelector<Selected>(selector: Selector<Selected>) {

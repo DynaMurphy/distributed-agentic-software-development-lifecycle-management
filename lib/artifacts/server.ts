@@ -1,7 +1,11 @@
 import type { UIMessageStreamWriter } from "ai";
 import type { Session } from "next-auth";
+import { backlogDocumentHandler } from "@/artifacts/backlog/server";
+import { bugDocumentHandler } from "@/artifacts/bug/server";
 import { codeDocumentHandler } from "@/artifacts/code/server";
+import { featureDocumentHandler } from "@/artifacts/feature/server";
 import { sheetDocumentHandler } from "@/artifacts/sheet/server";
+import { specDocumentHandler } from "@/artifacts/spec/server";
 import { textDocumentHandler } from "@/artifacts/text/server";
 import type { ArtifactKind } from "@/components/artifact";
 import { saveDocument } from "../db/queries";
@@ -21,6 +25,8 @@ export type CreateDocumentCallbackProps = {
   title: string;
   dataStream: UIMessageStreamWriter<ChatMessage>;
   session: Session;
+  /** Optional context or description used by handlers that need richer input (e.g. spec generation from a feature). */
+  description?: string;
 };
 
 export type UpdateDocumentCallbackProps = {
@@ -49,6 +55,7 @@ export function createDocumentHandler<T extends ArtifactKind>(config: {
         title: args.title,
         dataStream: args.dataStream,
         session: args.session,
+        description: args.description,
       });
 
       if (args.session?.user?.id) {
@@ -93,6 +100,10 @@ export const documentHandlersByArtifactKind: DocumentHandler[] = [
   textDocumentHandler,
   codeDocumentHandler,
   sheetDocumentHandler,
+  specDocumentHandler,
+  featureDocumentHandler,
+  bugDocumentHandler,
+  backlogDocumentHandler,
 ];
 
-export const artifactKinds = ["text", "code", "sheet"] as const;
+export const artifactKinds = ["text", "code", "sheet", "spec", "feature", "bug", "backlog"] as const;

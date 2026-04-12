@@ -8,13 +8,19 @@ import {
   type SetStateAction,
   useCallback,
   useEffect,
+  useMemo,
+  useRef,
   useState,
 } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { useDebounceCallback, useWindowSize } from "usehooks-ts";
+import { backlogArtifact } from "@/artifacts/backlog/client";
+import { bugArtifact } from "@/artifacts/bug/client";
 import { codeArtifact } from "@/artifacts/code/client";
+import { featureArtifact } from "@/artifacts/feature/client";
 import { imageArtifact } from "@/artifacts/image/client";
 import { sheetArtifact } from "@/artifacts/sheet/client";
+import { specArtifact } from "@/artifacts/spec/client";
 import { textArtifact } from "@/artifacts/text/client";
 import { useArtifact } from "@/hooks/use-artifact";
 import type { Document, Vote } from "@/lib/db/schema";
@@ -23,17 +29,49 @@ import { fetcher } from "@/lib/utils";
 import { ArtifactActions } from "./artifact-actions";
 import { ArtifactCloseButton } from "./artifact-close-button";
 import { ArtifactMessages } from "./artifact-messages";
+import { InlineEditableTitle } from "./inline-editable-title";
 import { MultimodalInput } from "./multimodal-input";
 import { Toolbar } from "./toolbar";
-import { useSidebar } from "./ui/sidebar";
+import { useSidebar, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX } from "./ui/sidebar";
 import { VersionFooter } from "./version-footer";
+import { VersionHistoryPanel } from "./version-history-panel";
 import type { VisibilityType } from "./visibility-selector";
+
+/** Parse a CSS sidebar width value (e.g. "320px", "16rem") to a pixel number. */
+function parseSidebarWidth(value: string): number {
+  if (value.endsWith("px")) return Number.parseInt(value, 10) || 256;
+  if (value.endsWith("rem")) return (Number.parseFloat(value) || 16) * 16;
+  return 256;
+}
+
+/** Extract "Updated … ago" from SPLM artifact JSON content (bugs, features, backlog). */
+function SplmMetadataLine({ content }: { content: string }) {
+  try {
+    const parsed = JSON.parse(content);
+    const dateStr = parsed.valid_from ?? parsed.created_at;
+    if (!dateStr) return null;
+    return (
+      <div className="text-muted-foreground text-sm">
+        {`Updated ${formatDistance(new Date(dateStr), new Date(), { addSuffix: true })}`}
+        {parsed.maintained_by_email && (
+          <span> by {parsed.maintained_by_email}</span>
+        )}
+      </div>
+    );
+  } catch {
+    return null;
+  }
+}
 
 export const artifactDefinitions = [
   textArtifact,
   codeArtifact,
   imageArtifact,
   sheetArtifact,
+  specArtifact,
+  featureArtifact,
+  bugArtifact,
+  backlogArtifact,
 ];
 export type ArtifactKind = (typeof artifactDefinitions)[number]["kind"];
 
@@ -89,34 +127,78 @@ function PureArtifact({
 }) {
   const { artifact, setArtifact, metadata, setMetadata } = useArtifact();
 
+  const splmKinds = ["feature", "bug", "backlog"];
+  const isSplmArtifact = splmKinds.includes(artifact.kind);
+
+  // Guard against invalid / placeholder document IDs ("init", literal "undefined")
+  const hasValidDocumentId =
+    artifact.documentId &&
+    artifact.documentId !== "init" &&
+    artifact.documentId !== "undefined";
+
   const {
     data: documents,
     isLoading: isDocumentsFetching,
     mutate: mutateDocuments,
   } = useSWR<Document[]>(
-    artifact.documentId !== "init" && artifact.status !== "streaming"
-      ? `/api/document?id=${artifact.documentId}`
+    hasValidDocumentId && artifact.status !== "streaming" && !isSplmArtifact
+      ? artifact.kind === "spec"
+        ? `/api/spec-document?id=${artifact.documentId}`
+        : `/api/document?id=${artifact.documentId}`
       : null,
-    fetcher
+    fetcher,
+    {
+      // Prevent infinite retry loops if the document hasn't been persisted yet
+      shouldRetryOnError: false,
+    }
   );
 
   const [mode, setMode] = useState<"edit" | "diff">("edit");
-  const [document, setDocument] = useState<Document | null>(null);
   const [currentVersionIndex, setCurrentVersionIndex] = useState(-1);
+  const prevDocumentIdRef = useRef<string | null>(null);
 
-  const { open: isSidebarOpen } = useSidebar();
+  // Derive `document` from the SWR cache so it's available immediately on
+  // remount (no extra render cycle where document === null).
+  const document = useMemo(() => {
+    if (!documents || documents.length === 0) return null;
+    if (currentVersionIndex >= 0 && currentVersionIndex < documents.length) {
+      return documents[currentVersionIndex];
+    }
+    return documents.at(-1) ?? null;
+  }, [documents, currentVersionIndex]);
+
+  const { open: isSidebarOpen, sidebarWidth, setSidebarWidth } = useSidebar();
+  const chatPanelWidth = parseSidebarWidth(sidebarWidth);
 
   useEffect(() => {
     if (documents && documents.length > 0) {
       const mostRecentDocument = documents.at(-1);
 
       if (mostRecentDocument) {
-        setDocument(mostRecentDocument);
-        setCurrentVersionIndex(documents.length - 1);
-        setArtifact((currentArtifact) => ({
-          ...currentArtifact,
-          content: mostRecentDocument.content ?? "",
-        }));
+        // Only reset version index when switching to a different artifact
+        // (not on SWR revalidation of the same document).
+        const docId = mostRecentDocument.id;
+        if (prevDocumentIdRef.current !== docId) {
+          setCurrentVersionIndex(documents.length - 1);
+          prevDocumentIdRef.current = docId;
+        }
+
+        setArtifact((currentArtifact) => {
+          // For spec artifacts, don't overwrite content that was loaded from
+          // streaming or user edits — UNLESS the document ID changed (i.e.
+          // we switched to a different spec).
+          if (
+            currentArtifact.kind === "spec" &&
+            currentArtifact.content &&
+            currentArtifact.documentId === mostRecentDocument.id
+          ) {
+            return currentArtifact;
+          }
+          return {
+            ...currentArtifact,
+            content: mostRecentDocument.content ?? "",
+          };
+        });
       }
     }
   }, [documents, setArtifact]);
@@ -128,9 +210,24 @@ function PureArtifact({
   const { mutate } = useSWRConfig();
   const [isContentDirty, setIsContentDirty] = useState(false);
 
+  // Reset dirty flag when the document changes.
+  useEffect(() => {
+    setIsContentDirty(false);
+    prevDocumentIdRef.current = null;
+  }, [artifact.documentId]);
+
   const handleContentChange = useCallback(
     (updatedContent: string) => {
       if (!artifact) {
+        return;
+      }
+
+      // For spec and SPLM artifacts, don't auto-save to DB. Just update local state.
+      if (artifact.kind === "spec" || splmKinds.includes(artifact.kind)) {
+        setArtifact((current) => ({
+          ...current,
+          content: updatedContent,
+        }));
         return;
       }
 
@@ -183,6 +280,18 @@ function PureArtifact({
 
   const saveContent = useCallback(
     (updatedContent: string, debounce: boolean) => {
+      // For SPLM artifacts, `document` is always null because we skip the
+      // SWR document fetch.  Bypass the guard so edits still propagate to
+      // `handleContentChange` (which updates the in-memory artifact content).
+      if (isSplmArtifact) {
+        if (debounce) {
+          debouncedHandleContentChange(updatedContent);
+        } else {
+          handleContentChange(updatedContent);
+        }
+        return;
+      }
+
       if (document && updatedContent !== document.content) {
         setIsContentDirty(true);
 
@@ -193,7 +302,7 @@ function PureArtifact({
         }
       }
     },
-    [document, debouncedHandleContentChange, handleContentChange]
+    [document, isSplmArtifact, debouncedHandleContentChange, handleContentChange]
   );
 
   function getDocumentContentById(index: number) {
@@ -229,6 +338,54 @@ function PureArtifact({
     }
   };
 
+  /** Jump directly to a specific version by index (used by VersionHistoryPanel). */
+  const handleSelectVersion = (index: number) => {
+    if (!documents || index < 0 || index >= documents.length) {
+      return;
+    }
+    setCurrentVersionIndex(index);
+  };
+
+  /**
+   * Handle document title changes from the inline-editable title component.
+   * Updates the in-memory artifact state and invalidates the SWR document cache
+   * so all UI elements reflect the new title immediately.
+   */
+  const handleTitleChange = useCallback(
+    (newTitle: string) => {
+      // Update the in-memory artifact state
+      setArtifact((current) => ({ ...current, title: newTitle }));
+
+      // Update the SWR document cache so version labels etc. also reflect the new title
+      if (artifact.kind === "spec") {
+        mutate<Document[]>(
+          `/api/spec-document?id=${artifact.documentId}`,
+          (currentDocuments) =>
+            currentDocuments?.map((doc) => ({ ...doc, title: newTitle })),
+          { revalidate: false }
+        );
+        // Revalidate sidebar listing
+        mutate("/api/spec-document");
+      } else if (artifact.kind === "feature") {
+        // Revalidate sidebar features list
+        mutate("/api/features");
+      } else if (artifact.kind === "bug") {
+        // Revalidate sidebar bugs list
+        mutate("/api/bugs");
+      } else {
+        mutate<Document[]>(
+          `/api/document?id=${artifact.documentId}`,
+          (currentDocuments) =>
+            currentDocuments?.map((doc) => ({ ...doc, title: newTitle })),
+          { revalidate: false }
+        );
+      }
+    },
+    [setArtifact, artifact.kind, artifact.documentId, mutate]
+  );
+
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
   const [isToolbarVisible, setIsToolbarVisible] = useState(false);
 
   /*
@@ -258,9 +415,10 @@ function PureArtifact({
       artifactDefinition.initialize({
         documentId: artifact.documentId,
         setMetadata,
+        setArtifact,
       });
     }
-  }, [artifact.documentId, artifactDefinition, setMetadata]);
+  }, [artifact.documentId, artifactDefinition, setMetadata, setArtifact]);
 
   return (
     <AnimatePresence>
@@ -277,11 +435,11 @@ function PureArtifact({
               animate={{ width: windowWidth, right: 0 }}
               className="fixed h-dvh bg-background"
               exit={{
-                width: isSidebarOpen ? windowWidth - 256 : windowWidth,
+                width: isSidebarOpen ? windowWidth - chatPanelWidth : windowWidth,
                 right: 0,
               }}
               initial={{
-                width: isSidebarOpen ? windowWidth - 256 : windowWidth,
+                width: isSidebarOpen ? windowWidth - chatPanelWidth : windowWidth,
                 right: 0,
               }}
             />
@@ -300,7 +458,8 @@ function PureArtifact({
                   damping: 30,
                 },
               }}
-              className="relative h-dvh w-[400px] shrink-0 bg-muted dark:bg-background"
+              className="relative h-dvh shrink-0 bg-muted dark:bg-background"
+              style={{ width: chatPanelWidth }}
               exit={{
                 opacity: 0,
                 x: 0,
@@ -313,7 +472,8 @@ function PureArtifact({
                 {!isCurrentVersion && (
                   <motion.div
                     animate={{ opacity: 1 }}
-                    className="absolute top-0 left-0 z-50 h-dvh w-[400px] bg-zinc-900/50"
+                    className="absolute top-0 left-0 z-50 h-dvh bg-zinc-900/50"
+                    style={{ width: chatPanelWidth }}
                     exit={{ opacity: 0 }}
                     initial={{ opacity: 0 }}
                   />
@@ -354,6 +514,43 @@ function PureArtifact({
             </motion.div>
           )}
 
+          {/* Resize divider between chat panel and artifact panel */}
+          {!isMobile && (
+            <div
+              className="fixed top-0 z-[60] h-dvh w-1 cursor-col-resize select-none"
+              style={{ left: chatPanelWidth - 2 }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const startX = e.clientX;
+                const startWidth = chatPanelWidth;
+
+                const handleMouseMove = (moveEvent: MouseEvent) => {
+                  const delta = moveEvent.clientX - startX;
+                  const newWidth = Math.min(
+                    SIDEBAR_WIDTH_MAX,
+                    Math.max(SIDEBAR_WIDTH_MIN, startWidth + delta)
+                  );
+                  setSidebarWidth(`${newWidth}px`);
+                };
+
+                const handleMouseUp = () => {
+                  window.document.removeEventListener("mousemove", handleMouseMove);
+                  window.document.removeEventListener("mouseup", handleMouseUp);
+                  window.document.body.style.cursor = "";
+                  window.document.body.style.userSelect = "";
+                };
+
+                window.document.body.style.cursor = "col-resize";
+                window.document.body.style.userSelect = "none";
+                window.document.addEventListener("mousemove", handleMouseMove);
+                window.document.addEventListener("mouseup", handleMouseUp);
+              }}
+            >
+              <div className="mx-auto h-full w-[2px] transition-colors hover:bg-sidebar-border" />
+            </div>
+          )}
+
           <motion.div
             animate={
               isMobile
@@ -374,12 +571,12 @@ function PureArtifact({
                   }
                 : {
                     opacity: 1,
-                    x: 400,
+                    x: chatPanelWidth,
                     y: 0,
                     height: windowHeight,
                     width: windowWidth
-                      ? windowWidth - 400
-                      : "calc(100dvw-400px)",
+                      ? windowWidth - chatPanelWidth
+                      : `calc(100dvw - ${chatPanelWidth}px)`,
                     borderRadius: 0,
                     transition: {
                       delay: 0,
@@ -426,22 +623,49 @@ function PureArtifact({
                 <ArtifactCloseButton />
 
                 <div className="flex flex-col">
-                  <div className="font-medium">{artifact.title}</div>
+                  <InlineEditableTitle
+                    documentId={artifact.documentId}
+                    isEditable={
+                      !isReadonly &&
+                      artifact.kind !== "backlog" &&
+                      isCurrentVersion &&
+                      artifact.status !== "streaming"
+                    }
+                    kind={artifact.kind}
+                    onTitleChange={handleTitleChange}
+                    title={artifact.title}
+                  />
 
                   {isContentDirty ? (
                     <div className="text-muted-foreground text-sm">
                       Saving changes...
                     </div>
                   ) : document ? (
-                    <div className="text-muted-foreground text-sm">
-                      {`Updated ${formatDistance(
-                        new Date(document.createdAt),
-                        new Date(),
-                        {
-                          addSuffix: true,
-                        }
-                      )}`}
+                    <div className="flex items-center gap-2">
+                      <div className="text-muted-foreground text-sm">
+                        {`Updated ${formatDistance(
+                          new Date(document.createdAt),
+                          new Date(),
+                          {
+                            addSuffix: true,
+                          }
+                        )}`}
+                        {(document as any).maintainedByEmail && (
+                          <span> by {(document as any).maintainedByEmail}</span>
+                        )}
+                      </div>
+                      {documents && documents.length > 1 && (
+                        <button
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5 rounded-md hover:bg-muted"
+                          onClick={() => setIsHistoryOpen((v) => !v)}
+                          type="button"
+                        >
+                          {isHistoryOpen ? "Hide" : `${documents.length} versions`}
+                        </button>
+                      )}
                     </div>
+                  ) : isSplmArtifact && artifact.content ? (
+                    <SplmMetadataLine content={artifact.content} />
                   ) : (
                     <div className="mt-2 h-3 w-32 animate-pulse rounded-md bg-muted-foreground/20" />
                   )}
@@ -459,8 +683,19 @@ function PureArtifact({
               />
             </div>
 
+            <AnimatePresence>
+              {isHistoryOpen && (
+                <VersionHistoryPanel
+                  currentVersionIndex={currentVersionIndex}
+                  documents={documents}
+                  onSelectVersion={handleSelectVersion}
+                />
+              )}
+            </AnimatePresence>
+
             <div className="h-full max-w-full! items-center overflow-y-scroll bg-background dark:bg-muted">
               <artifactDefinition.content
+                key={`${artifact.kind}-${artifact.documentId}`}
                 content={
                   isCurrentVersion
                     ? artifact.content
@@ -483,7 +718,10 @@ function PureArtifact({
               <AnimatePresence>
                 {isCurrentVersion && (
                   <Toolbar
+                    artifactContent={artifact.content}
+                    artifactId={artifact.documentId}
                     artifactKind={artifact.kind}
+                    artifactTitle={artifact.title}
                     isToolbarVisible={isToolbarVisible}
                     sendMessage={sendMessage}
                     setIsToolbarVisible={setIsToolbarVisible}
@@ -521,7 +759,7 @@ export const Artifact = memo(PureArtifact, (prevProps, nextProps) => {
   if (prevProps.input !== nextProps.input) {
     return false;
   }
-  if (!equal(prevProps.messages, nextProps.messages.length)) {
+  if (prevProps.messages.length !== nextProps.messages.length) {
     return false;
   }
   if (prevProps.selectedVisibilityType !== nextProps.selectedVisibilityType) {
