@@ -82,6 +82,53 @@ export const chatModels: ChatModel[] = [
   },
 ];
 
+// Copilot Pro+ models — available when USE_COPILOT_SDK is enabled
+export const copilotModels: ChatModel[] = [
+  {
+    id: "copilot/claude-opus-4.6",
+    name: "Claude Opus 4.6",
+    provider: "copilot",
+    description: "Most capable Anthropic model via Copilot Pro+",
+  },
+  {
+    id: "copilot/claude-opus-4",
+    name: "Claude Opus 4",
+    provider: "copilot",
+    description: "Powerful Anthropic model via Copilot Pro+",
+  },
+  {
+    id: "copilot/claude-sonnet-4",
+    name: "Claude Sonnet 4",
+    provider: "copilot",
+    description: "Fast and capable via Copilot Pro+",
+  },
+  {
+    id: "copilot/gpt-4.1",
+    name: "GPT-4.1",
+    provider: "copilot",
+    description: "OpenAI flagship via Copilot Pro+",
+  },
+  {
+    id: "copilot/o3-pro",
+    name: "o3 Pro",
+    provider: "copilot",
+    description: "Advanced reasoning via Copilot Pro+",
+  },
+  {
+    id: "copilot/gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    provider: "copilot",
+    description: "Google flagship via Copilot Pro+",
+  },
+];
+
+/**
+ * Get all available models, optionally including Copilot Pro+ models.
+ */
+export function getAllModels(includeCopilot = false): ChatModel[] {
+  return includeCopilot ? [...chatModels, ...copilotModels] : chatModels;
+}
+
 // Group models by provider for UI
 export const modelsByProvider = chatModels.reduce(
   (acc, model) => {
@@ -93,3 +140,20 @@ export const modelsByProvider = chatModels.reduce(
   },
   {} as Record<string, ChatModel[]>
 );
+
+/**
+ * Group models by provider, optionally including Copilot models.
+ */
+export function getModelsByProvider(includeCopilot = false): Record<string, ChatModel[]> {
+  const models = getAllModels(includeCopilot);
+  return models.reduce(
+    (acc, model) => {
+      if (!acc[model.provider]) {
+        acc[model.provider] = [];
+      }
+      acc[model.provider].push(model);
+      return acc;
+    },
+    {} as Record<string, ChatModel[]>
+  );
+}

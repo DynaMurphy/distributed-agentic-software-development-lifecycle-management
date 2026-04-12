@@ -28,9 +28,9 @@ import {
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
 import {
-  chatModels,
   DEFAULT_CHAT_MODEL,
-  modelsByProvider,
+  getAllModels,
+  getModelsByProvider,
 } from "@/lib/ai/models";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -505,10 +505,13 @@ function PureModelSelectorCompact({
 }) {
   const [open, setOpen] = useState(false);
 
+  const isCopilotEnabled = process.env.NEXT_PUBLIC_USE_COPILOT_SDK === "true";
+  const allModels = getAllModels(isCopilotEnabled);
+
   const selectedModel =
-    chatModels.find((m) => m.id === selectedModelId) ??
-    chatModels.find((m) => m.id === DEFAULT_CHAT_MODEL) ??
-    chatModels[0];
+    allModels.find((m) => m.id === selectedModelId) ??
+    allModels.find((m) => m.id === DEFAULT_CHAT_MODEL) ??
+    allModels[0];
   const [provider] = selectedModel.id.split("/");
 
   // Provider display names
@@ -518,7 +521,10 @@ function PureModelSelectorCompact({
     google: "Google",
     xai: "xAI",
     reasoning: "Reasoning",
+    copilot: "Copilot Pro+",
   };
+
+  const grouped = getModelsByProvider(isCopilotEnabled);
 
   return (
     <ModelSelector onOpenChange={setOpen} open={open}>
@@ -531,7 +537,7 @@ function PureModelSelectorCompact({
       <ModelSelectorContent>
         <ModelSelectorInput placeholder="Search models..." />
         <ModelSelectorList>
-          {Object.entries(modelsByProvider).map(
+          {Object.entries(grouped).map(
             ([providerKey, providerModels]) => (
               <ModelSelectorGroup
                 heading={providerNames[providerKey] ?? providerKey}

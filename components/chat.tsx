@@ -77,6 +77,8 @@ export function Chat({
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
 
+  const isCopilotModel = currentModelId.startsWith("copilot/");
+
   const {
     messages,
     setMessages,
@@ -103,7 +105,7 @@ export function Chat({
       return shouldContinue;
     },
     transport: new DefaultChatTransport({
-      api: "/api/chat",
+      api: isCopilotModel ? "/api/copilot-chat" : "/api/chat",
       fetch: fetchWithErrorHandlers,
       prepareSendMessagesRequest(request) {
         const lastMessage = request.messages.at(-1);
@@ -179,7 +181,7 @@ export function Chat({
   const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
 
   useAutoResume({
-    autoResume,
+    autoResume: autoResume && !isCopilotModel,
     initialMessages,
     resumeStream,
     setMessages,
