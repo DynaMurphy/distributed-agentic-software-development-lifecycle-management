@@ -7,7 +7,7 @@ import { auth } from "@/app/(auth)/auth";
 import {
   getCopilotClient,
   getSplmMcpConfig,
-  splmAgents,
+  buildSplmAgents,
   serverPermissionHandler,
 } from "@/lib/copilot";
 import { getSkillDirectories } from "@/lib/skills";
@@ -105,7 +105,7 @@ export async function POST(request: Request) {
               model: copilotModel,
               onPermissionRequest: serverPermissionHandler,
               mcpServers: getSplmMcpConfig(),
-              customAgents: splmAgents,
+              customAgents: buildSplmAgents({ hubRoot: process.cwd() }),
               ...(agent ? { agent } : {}),
               workingDirectory: process.cwd(),
               streaming: true,
@@ -117,16 +117,16 @@ export async function POST(request: Request) {
         }
 
         if (!copilotSession) {
+          const resolverConfig = { hubRoot: process.cwd() };
+
           copilotSession = await client.createSession({
             model: copilotModel,
             onPermissionRequest: serverPermissionHandler,
             mcpServers: getSplmMcpConfig(),
-            customAgents: splmAgents,
+            customAgents: buildSplmAgents(resolverConfig),
             ...(agent ? { agent } : {}),
             workingDirectory: process.cwd(),
-            skillDirectories: getSkillDirectories({
-              hubRoot: process.cwd(),
-            }),
+            skillDirectories: getSkillDirectories(resolverConfig),
             streaming: true,
             systemMessage: {
               mode: "append",
