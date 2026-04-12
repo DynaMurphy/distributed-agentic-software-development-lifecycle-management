@@ -9,7 +9,7 @@ import { SessionProvider } from "next-auth/react";
 export const metadata: Metadata = {
   metadataBase: new URL("https://chat.vercel.ai"),
   title: "AI assisted SPLM",
-  description: "AI assisted Software Product Lifecycle Management (SPLM) tool",
+  description: "AI-assisted Software Product Lifecycle Management (SPLM) tool",
 };
 
 export const viewport = {
