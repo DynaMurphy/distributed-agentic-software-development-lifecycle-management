@@ -48,6 +48,15 @@ export async function GET(request: Request) {
     return new ChatSDKError("not_found:feature").toResponse();
   }
 
+  // Safety: unwrap double-serialized ai_metadata (stored as JSONB string)
+  if (feature.ai_metadata && typeof feature.ai_metadata === "string") {
+    try {
+      feature.ai_metadata = JSON.parse(feature.ai_metadata);
+    } catch {
+      feature.ai_metadata = {};
+    }
+  }
+
   const subFeatures = await getSubFeatures(id);
 
   return Response.json({ ...feature, subFeatures }, { status: 200 });

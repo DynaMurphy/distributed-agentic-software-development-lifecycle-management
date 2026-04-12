@@ -1,26 +1,72 @@
 "use client";
 
-import { SparklesIcon } from "@/components/icons";
+import { useState } from "react";
+import { PenIcon, SparklesIcon } from "@/components/icons";
 
 interface AIInsightsPanelProps {
   aiMetadata: Record<string, any>;
+  /** When provided, the panel shows an edit toggle and calls this on changes. */
+  onAiMetadataChange?: (updated: Record<string, any>) => void;
 }
 
 /**
  * Shared AI Insights panel displaying structured sections per AI action type.
  * Used in both feature and bug artifact detail views.
  */
-export function AIInsightsPanel({ aiMetadata }: AIInsightsPanelProps) {
+export function AIInsightsPanel({ aiMetadata, onAiMetadataChange }: AIInsightsPanelProps) {
+  const [isEditing, setIsEditing] = useState(false);
   if (!aiMetadata || Object.keys(aiMetadata).length === 0) return null;
+
+  const canEdit = !!onAiMetadataChange;
+
+  /** Helper to update a nested section field */
+  const updateSection = (section: string, field: string, value: any) => {
+    if (!onAiMetadataChange) return;
+    onAiMetadataChange({
+      ...aiMetadata,
+      [section]: { ...aiMetadata[section], [field]: value },
+    });
+  };
+
+  /** Helper to replace a full section */
+  const replaceSection = (section: string, data: any) => {
+    if (!onAiMetadataChange) return;
+    onAiMetadataChange({
+      ...aiMetadata,
+      [section]: data,
+    });
+  };
 
   return (
     <div className="space-y-2">
-      <label className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
-        <SparklesIcon size={14} /> AI Insights
-      </label>
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+          <SparklesIcon size={14} /> AI Insights
+        </label>
+        {canEdit && (
+          <button
+            type="button"
+            className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
+              isEditing
+                ? "bg-primary text-primary-foreground border-primary"
+                : "hover:bg-muted border-transparent"
+            }`}
+            onClick={() => setIsEditing(!isEditing)}
+          >
+            <PenIcon size={12} />
+            {isEditing ? "Done" : "Edit"}
+          </button>
+        )}
+      </div>
       <div className="p-3 rounded-md border bg-muted/10 text-sm space-y-3">
         {/* 🎯 Triage */}
-        {aiMetadata.triage && <TriageSection data={aiMetadata.triage} />}
+        {aiMetadata.triage && (
+          <TriageSection
+            data={aiMetadata.triage}
+            isEditing={isEditing}
+            onUpdate={(field, value) => updateSection("triage", field, value)}
+          />
+        )}
 
         {/* 🔍 Duplicates */}
         {aiMetadata.duplicateCheck && (
@@ -39,21 +85,39 @@ export function AIInsightsPanel({ aiMetadata }: AIInsightsPanelProps) {
 
         {/* 💥 Impact Analysis */}
         {aiMetadata.impactAnalysis && (
-          <ImpactSection data={aiMetadata.impactAnalysis} />
+          <ImpactSection
+            data={aiMetadata.impactAnalysis}
+            isEditing={isEditing}
+            onUpdate={(field, value) => updateSection("impactAnalysis", field, value)}
+          />
         )}
 
         {/* 🔧 Implementation Plan */}
         {aiMetadata.implementationPlan && (
-          <ImplementationPlanSection data={aiMetadata.implementationPlan} />
+          <ImplementationPlanSection
+            data={aiMetadata.implementationPlan}
+            isEditing={isEditing}
+            onUpdate={(field, value) => updateSection("implementationPlan", field, value)}
+          />
         )}
 
         {/* 🧪 Test Plan */}
         {aiMetadata.testPlan && (
-          <TestPlanSection data={aiMetadata.testPlan} />
+          <TestPlanSection
+            data={aiMetadata.testPlan}
+            isEditing={isEditing}
+            onReplace={(data) => replaceSection("testPlan", data)}
+          />
         )}
 
         {/* ✅ Signoff */}
-        {aiMetadata.signoff && <SignoffSection data={aiMetadata.signoff} />}
+        {aiMetadata.signoff && (
+          <SignoffSection
+            data={aiMetadata.signoff}
+            isEditing={isEditing}
+            onUpdate={(field, value) => updateSection("signoff", field, value)}
+          />
+        )}
 
         {/* 📐 Design Phase summary */}
         {aiMetadata.designPhase && (
@@ -77,7 +141,15 @@ function SectionTimestamp({ date }: { date?: string }) {
   );
 }
 
-function TriageSection({ data }: { data: Record<string, any> }) {
+function TriageSection({
+  data,
+  isEditing,
+  onUpdate,
+}: {
+  data: Record<string, any>;
+  isEditing?: boolean;
+  onUpdate?: (field: string, value: any) => void;
+}) {
   return (
     <div className="space-y-1">
       <div className="font-medium flex items-center gap-1.5">
@@ -85,23 +157,46 @@ function TriageSection({ data }: { data: Record<string, any> }) {
         <SectionTimestamp date={data.triagedAt} />
       </div>
       <div className="grid grid-cols-2 gap-1 text-xs">
-        {data.suggestedPriority && (
+        {data.suggestedPriority !== undefined && (
           <div>
             Priority:{" "}
-            <span className="font-medium capitalize">
-              {data.suggestedPriority}
-            </span>
+            {isEditing ? (
+              <EditableSelect
+                value={data.suggestedPriority}
+                options={["critical", "high", "medium", "low"]}
+                onChange={(v) => onUpdate?.("suggestedPriority", v)}
+              />
+            ) : (
+              <span className="font-medium capitalize">{data.suggestedPriority}</span>
+            )}
           </div>
         )}
-        {data.suggestedEffort && (
+        {data.suggestedEffort !== undefined && (
           <div>
-            Effort: <span className="font-medium">{data.suggestedEffort}</span>
+            Effort:{" "}
+            {isEditing ? (
+              <EditableSelect
+                value={data.suggestedEffort}
+                options={["xs", "s", "m", "l", "xl"]}
+                onChange={(v) => onUpdate?.("suggestedEffort", v)}
+              />
+            ) : (
+              <span className="font-medium">{data.suggestedEffort}</span>
+            )}
           </div>
         )}
-        {data.riskLevel && (
+        {data.riskLevel !== undefined && (
           <div>
             Risk:{" "}
-            <span className="font-medium capitalize">{data.riskLevel}</span>
+            {isEditing ? (
+              <EditableSelect
+                value={data.riskLevel}
+                options={["low", "medium", "high"]}
+                onChange={(v) => onUpdate?.("riskLevel", v)}
+              />
+            ) : (
+              <span className="font-medium capitalize">{data.riskLevel}</span>
+            )}
           </div>
         )}
         {data.suggestedSprint && (
@@ -111,8 +206,20 @@ function TriageSection({ data }: { data: Record<string, any> }) {
           </div>
         )}
       </div>
-      {data.rationale && (
-        <p className="text-xs text-muted-foreground mt-1">{data.rationale}</p>
+      {data.rationale !== undefined && (
+        <div className="mt-1">
+          {isEditing ? (
+            <EditableText
+              value={data.rationale ?? ""}
+              onChange={(v) => onUpdate?.("rationale", v)}
+              placeholder="Rationale..."
+            />
+          ) : (
+            data.rationale && (
+              <p className="text-xs text-muted-foreground">{data.rationale}</p>
+            )
+          )}
+        </div>
       )}
     </div>
   );
@@ -188,13 +295,21 @@ function SpecGenerationSection({ data }: { data: Record<string, any> }) {
   );
 }
 
-function ImpactSection({ data }: { data: Record<string, any> }) {
+function ImpactSection({
+  data,
+  isEditing,
+  onUpdate,
+}: {
+  data: Record<string, any>;
+  isEditing?: boolean;
+  onUpdate?: (field: string, value: any) => void;
+}) {
   return (
     <div className="space-y-1">
       <div className="font-medium flex items-center gap-1.5">
         💥 Impact
         <SectionTimestamp date={data.analyzedAt} />
-        {data.overallRisk && (
+        {data.overallRisk && !isEditing && (
           <span
             className={`text-xs px-1.5 py-0.5 rounded-full ${
               data.overallRisk === "high"
@@ -207,9 +322,28 @@ function ImpactSection({ data }: { data: Record<string, any> }) {
             {data.overallRisk} risk
           </span>
         )}
+        {isEditing && data.overallRisk !== undefined && (
+          <EditableSelect
+            value={data.overallRisk}
+            options={["low", "medium", "high"]}
+            onChange={(v) => onUpdate?.("overallRisk", v)}
+          />
+        )}
       </div>
-      {data.summary && (
-        <p className="text-xs text-muted-foreground">{data.summary}</p>
+      {data.summary !== undefined && (
+        <div>
+          {isEditing ? (
+            <EditableText
+              value={data.summary ?? ""}
+              onChange={(v) => onUpdate?.("summary", v)}
+              placeholder="Impact summary..."
+            />
+          ) : (
+            data.summary && (
+              <p className="text-xs text-muted-foreground">{data.summary}</p>
+            )
+          )}
+        </div>
       )}
       {Array.isArray(data.recommendations) &&
         data.recommendations.length > 0 && (
@@ -223,15 +357,35 @@ function ImpactSection({ data }: { data: Record<string, any> }) {
   );
 }
 
-function ImplementationPlanSection({ data }: { data: Record<string, any> }) {
+function ImplementationPlanSection({
+  data,
+  isEditing,
+  onUpdate,
+}: {
+  data: Record<string, any>;
+  isEditing?: boolean;
+  onUpdate?: (field: string, value: any) => void;
+}) {
   return (
     <div className="space-y-1">
       <div className="font-medium flex items-center gap-1.5">
         🔧 Implementation Plan
         <SectionTimestamp date={data.analyzedAt} />
       </div>
-      {data.approach && (
-        <p className="text-xs text-muted-foreground">{data.approach}</p>
+      {data.approach !== undefined && (
+        <div>
+          {isEditing ? (
+            <EditableText
+              value={data.approach ?? ""}
+              onChange={(v) => onUpdate?.("approach", v)}
+              placeholder="Implementation approach..."
+            />
+          ) : (
+            data.approach && (
+              <p className="text-xs text-muted-foreground">{data.approach}</p>
+            )
+          )}
+        </div>
       )}
       {Array.isArray(data.tasks) && data.tasks.length > 0 && (
         <div className="space-y-1">
@@ -254,7 +408,15 @@ function ImplementationPlanSection({ data }: { data: Record<string, any> }) {
   );
 }
 
-function TestPlanSection({ data }: { data: Record<string, any> }) {
+function TestPlanSection({
+  data,
+  isEditing,
+  onReplace,
+}: {
+  data: Record<string, any>;
+  isEditing?: boolean;
+  onReplace?: (data: any) => void;
+}) {
   return (
     <div className="space-y-1">
       <div className="font-medium flex items-center gap-1.5">
@@ -282,42 +444,74 @@ function TestPlanSection({ data }: { data: Record<string, any> }) {
         data.acceptanceCriteria.length > 0 && (
           <div className="mt-1">
             <div className="text-xs font-medium">Acceptance Criteria</div>
-            <ul className="text-xs text-muted-foreground list-disc list-inside">
-              {data.acceptanceCriteria.map((c: string, i: number) => (
-                <li key={i}>{c}</li>
-              ))}
-            </ul>
+            {isEditing ? (
+              <EditableList
+                items={data.acceptanceCriteria}
+                onChange={(items) => onReplace?.({ ...data, acceptanceCriteria: items })}
+                placeholder="Acceptance criterion..."
+              />
+            ) : (
+              <ul className="text-xs text-muted-foreground list-disc list-inside">
+                {data.acceptanceCriteria.map((c: string, i: number) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
       {Array.isArray(data.edgeCases) && data.edgeCases.length > 0 && (
         <div className="mt-1">
           <div className="text-xs font-medium">Edge Cases</div>
-          <ul className="text-xs text-muted-foreground list-disc list-inside">
-            {data.edgeCases.map((e: string, i: number) => (
-              <li key={i}>{e}</li>
-            ))}
-          </ul>
+          {isEditing ? (
+            <EditableList
+              items={data.edgeCases}
+              onChange={(items) => onReplace?.({ ...data, edgeCases: items })}
+              placeholder="Edge case..."
+            />
+          ) : (
+            <ul className="text-xs text-muted-foreground list-disc list-inside">
+              {data.edgeCases.map((e: string, i: number) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function SignoffSection({ data }: { data: Record<string, any> }) {
+function SignoffSection({
+  data,
+  isEditing,
+  onUpdate,
+}: {
+  data: Record<string, any>;
+  isEditing?: boolean;
+  onUpdate?: (field: string, value: any) => void;
+}) {
   return (
     <div className="space-y-1">
       <div className="font-medium flex items-center gap-1.5">
         ✅ Signoff
         <SectionTimestamp date={data.signedOffAt} />
-        <span
-          className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-            data.verdict === "approved"
-              ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400"
-              : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
-          }`}
-        >
-          {data.verdict}
-        </span>
+        {isEditing ? (
+          <EditableSelect
+            value={data.verdict}
+            options={["approved", "needs_work"]}
+            onChange={(v) => onUpdate?.("verdict", v)}
+          />
+        ) : (
+          <span
+            className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+              data.verdict === "approved"
+                ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400"
+                : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+            }`}
+          >
+            {data.verdict}
+          </span>
+        )}
       </div>
       {data.summary && (
         <p className="text-xs text-muted-foreground">{data.summary}</p>
@@ -373,6 +567,106 @@ function DesignPhaseSection({ data }: { data: Record<string, any> }) {
           <span className="font-medium">{data.specGenerated ? "Yes" : "No"}</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// Inline Editing Primitives
+// =============================================================================
+
+function EditableSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      className="text-xs bg-background border rounded px-1.5 py-0.5 capitalize"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {options.map((opt) => (
+        <option key={opt} value={opt}>
+          {opt.replace(/_/g, " ")}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function EditableText({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <textarea
+      className="w-full text-xs bg-background border rounded px-2 py-1 resize-y min-h-[40px] focus:outline-none focus:ring-1 focus:ring-primary/20"
+      defaultValue={value}
+      onBlur={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+    />
+  );
+}
+
+function EditableList({
+  items,
+  onChange,
+  placeholder,
+}: {
+  items: string[];
+  onChange: (items: string[]) => void;
+  placeholder?: string;
+}) {
+  const handleItemChange = (index: number, value: string) => {
+    const updated = [...items];
+    updated[index] = value;
+    onChange(updated);
+  };
+
+  const handleRemove = (index: number) => {
+    onChange(items.filter((_, i) => i !== index));
+  };
+
+  const handleAdd = () => {
+    onChange([...items, ""]);
+  };
+
+  return (
+    <div className="space-y-1">
+      {items.map((item, i) => (
+        <div key={i} className="flex items-center gap-1">
+          <input
+            className="flex-1 text-xs bg-background border rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary/20"
+            defaultValue={item}
+            onBlur={(e) => handleItemChange(i, e.target.value)}
+            placeholder={placeholder}
+          />
+          <button
+            type="button"
+            className="text-[10px] text-muted-foreground hover:text-destructive shrink-0 px-1"
+            onClick={() => handleRemove(i)}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="text-[10px] text-muted-foreground hover:text-foreground"
+        onClick={handleAdd}
+      >
+        + Add item
+      </button>
     </div>
   );
 }

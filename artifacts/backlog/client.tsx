@@ -37,6 +37,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useSWRConfig } from "swr";
+import type { UIArtifact } from "@/components/artifact";
 
 interface BacklogItemData {
   id: string;
@@ -288,7 +290,13 @@ function AIActionButton({
 // AI METADATA INDICATOR (shows popover with results)
 // =============================================================================
 
-function AIMetadataIndicator({ aiMetadata }: { aiMetadata: Record<string, any> }) {
+function AIMetadataIndicator({
+  aiMetadata,
+  onOpenDetail,
+}: {
+  aiMetadata: Record<string, any>;
+  onOpenDetail?: () => void;
+}) {
   const [isOpen, setIsOpen] = useState(false);
 
   if (!aiMetadata || Object.keys(aiMetadata).length === 0) return null;
@@ -429,6 +437,19 @@ function AIMetadataIndicator({ aiMetadata }: { aiMetadata: Record<string, any> }
                 </div>
               ))}
             </div>
+            {onOpenDetail && (
+              <button
+                type="button"
+                className="mt-2 w-full text-[10px] text-center py-1 rounded border border-dashed hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsOpen(false);
+                  onOpenDetail();
+                }}
+              >
+                View &amp; Edit Details →
+              </button>
+            )}
           </div>
         </>
       )}
@@ -444,10 +465,12 @@ function SortableCard({
   item,
   isDragging,
   onItemUpdate,
+  onOpenDetail,
 }: {
   item: BacklogItemData;
   isDragging?: boolean;
   onItemUpdate: (itemId: string, updates: Partial<BacklogItemData>) => void;
+  onOpenDetail: (item: BacklogItemData) => void;
 }) {
   const {
     attributes,
@@ -472,6 +495,9 @@ function SortableCard({
       style={{ ...style, touchAction: "none" }}
       {...attributes}
       {...listeners}
+      onClick={() => {
+        if (!isSortDragging) onOpenDetail(item);
+      }}
       className={`group flex flex-col gap-1.5 p-2.5 rounded-lg border bg-background shadow-sm hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing ${
         isDragging ? "ring-2 ring-primary shadow-lg" : ""
       }`}
@@ -484,7 +510,10 @@ function SortableCard({
           {item.item_title ?? `${item.item_type} ${item.item_id.slice(0, 8)}`}
         </p>
         {item.ai_metadata && Object.keys(item.ai_metadata).length > 0 && (
-          <AIMetadataIndicator aiMetadata={item.ai_metadata} />
+          <AIMetadataIndicator
+            aiMetadata={item.ai_metadata}
+            onOpenDetail={() => onOpenDetail(item)}
+          />
         )}
         <AIActionButton item={item} onItemUpdate={onItemUpdate} />
       </div>
@@ -549,10 +578,12 @@ function KanbanColumn({
   column,
   items,
   onItemUpdate,
+  onOpenDetail,
 }: {
   column: (typeof KANBAN_COLUMNS)[number];
   items: BacklogItemData[];
   onItemUpdate: (itemId: string, updates: Partial<BacklogItemData>) => void;
+  onOpenDetail: (item: BacklogItemData) => void;
 }) {
   const { setNodeRef } = useSortable({
     id: `column-${column.id}`,
@@ -586,7 +617,7 @@ function KanbanColumn({
             </div>
           )}
           {items.map((item) => (
-            <SortableCard key={item.id} item={item} onItemUpdate={onItemUpdate} />
+            <SortableCard key={item.id} item={item} onItemUpdate={onItemUpdate} onOpenDetail={onOpenDetail} />
           ))}
         </div>
       </SortableContext>
@@ -601,6 +632,7 @@ function KanbanColumn({
 function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }) {
   const [items, setItems] = useState<BacklogItemData[]>(initialItems);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const { mutate } = useSWRConfig();
 
   /** Track the original column & status when a drag starts so handleDragEnd
    *  can detect cross-column moves even after handleDragOver optimistically
@@ -628,6 +660,23 @@ function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }
       );
     },
     []
+  );
+
+  /** Open the feature/bug detail artifact view */
+  const handleOpenDetail = useCallback(
+    (item: BacklogItemData) => {
+      const next: UIArtifact = {
+        documentId: item.item_id,
+        kind: item.item_type as "feature" | "bug",
+        title: item.item_title ?? "",
+        content: "",
+        isVisible: true,
+        status: "idle",
+        boundingBox: { top: 0, left: 0, width: 0, height: 0 },
+      };
+      mutate("artifact", next, { revalidate: false });
+    },
+    [mutate]
   );
 
   const sensors = useSensors(
@@ -878,6 +927,7 @@ function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }
               column={col}
               items={columnItems[col.id] ?? []}
               onItemUpdate={handleAIActionUpdate}
+              onOpenDetail={handleOpenDetail}
             />
           ))}
         </div>

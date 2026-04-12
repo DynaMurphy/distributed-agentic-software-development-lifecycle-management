@@ -6,6 +6,26 @@ import { ChatSDKError } from "../errors";
 // biome-ignore lint: Forbidden non-null assertion.
 const client = postgres(process.env.POSTGRES_URL!);
 
+/**
+ * Safely serialize a value for JSONB storage.
+ * Handles the case where the value is already a JSON string
+ * (e.g. from a prior double-serialization bug) to prevent
+ * exponential growth of escaped quotes.
+ */
+function toJsonbString(value: unknown, fallback = "{}"): string {
+  if (value == null) return fallback;
+  if (typeof value === "string") {
+    // Already a string — check if it's valid JSON
+    try {
+      JSON.parse(value);
+      return value; // It's a valid JSON string, use it directly
+    } catch {
+      return fallback;
+    }
+  }
+  return JSON.stringify(value);
+}
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -405,8 +425,8 @@ export async function restoreFeatureVersion(featureId: string, versionId: string
         ${v.priority}::varchar,
         ${v.effort_estimate}::varchar,
         ${v.assigned_to}::uuid,
-        ${v.tags ? JSON.stringify(v.tags) : '[]'}::jsonb,
-        ${v.ai_metadata ? JSON.stringify(v.ai_metadata) : '{}'}::jsonb,
+        ${toJsonbString(v.tags, "[]")}::jsonb,
+        ${toJsonbString(v.ai_metadata)}::jsonb,
         ${new Date()}::timestamptz,
         ${null}::uuid
       ) AS version_id
@@ -461,8 +481,8 @@ export async function createFeature(params: {
         ${params.effortEstimate ?? null}::varchar,
         ${params.createdBy ?? null}::uuid,
         ${params.assignedTo ?? null}::uuid,
-        ${JSON.stringify(params.tags ?? [])}::jsonb,
-        ${JSON.stringify(params.aiMetadata ?? {})}::jsonb,
+        ${toJsonbString(params.tags, "[]")}::jsonb,
+        ${toJsonbString(params.aiMetadata)}::jsonb,
         ${new Date()}::timestamptz,
         ${params.maintainedBy ?? null}::uuid
       ) AS version_id
@@ -503,8 +523,8 @@ export async function updateFeature(params: {
         ${params.priority ?? null}::varchar,
         ${params.effortEstimate ?? null}::varchar,
         ${params.assignedTo ?? null}::uuid,
-        ${params.tags ? JSON.stringify(params.tags) : null}::jsonb,
-        ${params.aiMetadata ? JSON.stringify(params.aiMetadata) : null}::jsonb,
+        ${params.tags ? toJsonbString(params.tags, "[]") : null}::jsonb,
+        ${params.aiMetadata ? toJsonbString(params.aiMetadata) : null}::jsonb,
         ${new Date()}::timestamptz,
         ${params.maintainedBy ?? null}::uuid
       ) AS version_id
@@ -619,8 +639,8 @@ export async function createBug(params: {
         ${JSON.stringify(params.environment ?? {})}::jsonb,
         ${params.createdBy ?? null}::uuid,
         ${params.assignedTo ?? null}::uuid,
-        ${JSON.stringify(params.tags ?? [])}::jsonb,
-        ${JSON.stringify(params.aiMetadata ?? {})}::jsonb,
+        ${toJsonbString(params.tags, "[]")}::jsonb,
+        ${toJsonbString(params.aiMetadata)}::jsonb,
         ${new Date()}::timestamptz,
         ${params.maintainedBy ?? null}::uuid
       ) AS version_id
@@ -665,8 +685,8 @@ export async function updateBug(params: {
         ${params.actualBehavior ?? null}::text,
         ${params.environment ? JSON.stringify(params.environment) : null}::jsonb,
         ${params.assignedTo ?? null}::uuid,
-        ${params.tags ? JSON.stringify(params.tags) : null}::jsonb,
-        ${params.aiMetadata ? JSON.stringify(params.aiMetadata) : null}::jsonb,
+        ${params.tags ? toJsonbString(params.tags, "[]") : null}::jsonb,
+        ${params.aiMetadata ? toJsonbString(params.aiMetadata) : null}::jsonb,
         ${new Date()}::timestamptz,
         ${params.maintainedBy ?? null}::uuid
       ) AS version_id
@@ -706,8 +726,8 @@ export async function restoreBugVersion(bugId: string, versionId: string): Promi
         ${v.actual_behavior}::text,
         ${v.environment ? JSON.stringify(v.environment) : '{}'}::jsonb,
         ${v.assigned_to}::uuid,
-        ${v.tags ? JSON.stringify(v.tags) : '[]'}::jsonb,
-        ${v.ai_metadata ? JSON.stringify(v.ai_metadata) : '{}'}::jsonb,
+        ${toJsonbString(v.tags, "[]")}::jsonb,
+        ${toJsonbString(v.ai_metadata)}::jsonb,
         ${new Date()}::timestamptz,
         ${null}::uuid
       ) AS version_id
@@ -796,8 +816,8 @@ export async function createTask(params: {
         ${params.priority ?? "medium"}::varchar,
         ${params.effortEstimate ?? null}::varchar,
         ${params.assignedTo ?? null}::uuid,
-        ${JSON.stringify(params.tags ?? [])}::jsonb,
-        ${JSON.stringify(params.aiMetadata ?? {})}::jsonb,
+        ${toJsonbString(params.tags, "[]")}::jsonb,
+        ${toJsonbString(params.aiMetadata)}::jsonb,
         ${new Date()}::timestamptz,
         ${params.maintainedBy ?? null}::uuid
       ) AS version_id
@@ -834,8 +854,8 @@ export async function updateTask(params: {
         ${params.priority ?? null}::varchar,
         ${params.effortEstimate ?? null}::varchar,
         ${params.assignedTo ?? null}::uuid,
-        ${params.tags ? JSON.stringify(params.tags) : null}::jsonb,
-        ${params.aiMetadata ? JSON.stringify(params.aiMetadata) : null}::jsonb,
+        ${params.tags ? toJsonbString(params.tags, "[]") : null}::jsonb,
+        ${params.aiMetadata ? toJsonbString(params.aiMetadata) : null}::jsonb,
         ${new Date()}::timestamptz,
         ${params.maintainedBy ?? null}::uuid
       ) AS version_id
@@ -904,6 +924,7 @@ export async function getBacklog(filters?: {
       LEFT JOIN current_features f ON bi.item_type = 'feature' AND bi.item_id = f.id AND f.valid_to = 'infinity'
       LEFT JOIN current_bugs b ON bi.item_type = 'bug' AND bi.item_id = b.id AND b.valid_to = 'infinity'
       WHERE bi.valid_to = 'infinity'
+        AND COALESCE(f.status, b.status) != 'rejected'
     `;
     const conditions: string[] = [];
     if (filters?.sprintLabel) conditions.push(`bi.sprint_label = '${filters.sprintLabel}'`);

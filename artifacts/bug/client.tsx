@@ -537,7 +537,14 @@ function BugDetailView({
 
       {/* AI Insights (shared component) */}
       {bug.ai_metadata && (
-        <AIInsightsPanel aiMetadata={bug.ai_metadata} />
+        <AIInsightsPanel
+          aiMetadata={bug.ai_metadata}
+          onAiMetadataChange={
+            isCurrentVersion
+              ? (updated) => onFieldChange("ai_metadata", updated)
+              : undefined
+          }
+        />
       )}
 
       {/* Last modified */}
@@ -891,6 +898,7 @@ export const bugArtifact = new Artifact<"bug", BugArtifactMetadata>({
               actualBehavior: data.actual_behavior,
               environment: data.environment,
               tags: data.tags,
+              aiMetadata: data.ai_metadata,
             }),
           });
 

@@ -46,6 +46,15 @@ export async function GET(request: Request) {
     return new ChatSDKError("not_found:bug").toResponse();
   }
 
+  // Safety: unwrap double-serialized ai_metadata (stored as JSONB string)
+  if (bug.ai_metadata && typeof bug.ai_metadata === "string") {
+    try {
+      bug.ai_metadata = JSON.parse(bug.ai_metadata);
+    } catch {
+      bug.ai_metadata = {};
+    }
+  }
+
   return Response.json(bug, { status: 200 });
 }
 

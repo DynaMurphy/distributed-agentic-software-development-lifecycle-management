@@ -391,7 +391,14 @@ function FeatureDetailView({
 
       {/* AI Insights (shared component) */}
       {feature.ai_metadata && (
-        <AIInsightsPanel aiMetadata={feature.ai_metadata} />
+        <AIInsightsPanel
+          aiMetadata={feature.ai_metadata}
+          onAiMetadataChange={
+            isCurrentVersion
+              ? (updated) => onFieldChange("ai_metadata", updated)
+              : undefined
+          }
+        />
       )}
 
       {/* Last modified */}
@@ -460,7 +467,8 @@ export const featureArtifact = new Artifact<"feature", FeatureArtifactMetadata>(
             }));
           }
         }
-      } catch {
+      } catch (e) {
+        console.error("[Feature] detail fetch error:", e);
         // Silently fail — content may already be populated via streaming
       }
     },
@@ -486,6 +494,16 @@ export const featureArtifact = new Artifact<"feature", FeatureArtifactMetadata>(
     }) => {
       if (isLoading || !content) {
         return <DocumentSkeleton artifactKind="text" />;
+      }
+
+      // Safety: reject absurdly large content to prevent UI freeze
+      if (content.length > 5_000_000) {
+        return (
+          <div className="p-6 text-sm text-destructive">
+            Feature data is too large to display ({(content.length / 1_000_000).toFixed(1)}MB).
+            This is likely caused by corrupted ai_metadata. Please contact support.
+          </div>
+        );
       }
 
       const versions = metadata?.versions ?? [];
@@ -743,6 +761,7 @@ export const featureArtifact = new Artifact<"feature", FeatureArtifactMetadata>(
                   status: data.status,
                   priority: data.priority,
                   tags: data.tags,
+                  aiMetadata: data.ai_metadata,
                 }),
               }
             );
