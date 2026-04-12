@@ -27,6 +27,35 @@ export type BugSeverity = "blocker" | "critical" | "major" | "minor" | "trivial"
 export type TaskStatus = "todo" | "in_progress" | "done" | "blocked";
 export type ItemType = "feature" | "bug" | "task";
 export type LinkType = "specification" | "test_plan" | "design" | "reference";
+export type RepositoryStatus = "active" | "archived";
+
+/** Well-known UUID for the default / local repository */
+export const DEFAULT_REPOSITORY_ID = "00000000-0000-0000-0000-000000000001";
+
+// --- Repository ---
+export interface BitemporalRepository {
+  id: string;
+  version_id: string;
+  name: string;
+  full_name: string | null;
+  description: string | null;
+  github_url: string | null;
+  default_branch: string;
+  status: RepositoryStatus;
+  settings: Record<string, unknown>;
+  maintained_by: string | null;
+  valid_from: Date;
+  valid_to: Date;
+}
+
+export interface BitemporalRepositorySummary {
+  id: string;
+  version_id: string;
+  name: string;
+  full_name: string | null;
+  status: RepositoryStatus;
+  valid_from: Date;
+}
 
 // --- Feature ---
 export interface BitemporalFeature {
@@ -45,6 +74,7 @@ export interface BitemporalFeature {
   ai_metadata: Record<string, unknown>;
   maintained_by: string | null;
   maintained_by_email: string | null;
+  repository_id: string;
   valid_from: Date;
   valid_to: Date;
 }
@@ -56,6 +86,7 @@ export interface BitemporalFeatureSummary {
   feature_type: FeatureType;
   status: CascadeStatus;
   priority: Priority;
+  repository_id: string;
   valid_from: Date;
 }
 
@@ -78,6 +109,7 @@ export interface BitemporalBug {
   ai_metadata: Record<string, unknown>;
   maintained_by: string | null;
   maintained_by_email: string | null;
+  repository_id: string;
   valid_from: Date;
   valid_to: Date;
 }
@@ -89,6 +121,7 @@ export interface BitemporalBugSummary {
   severity: BugSeverity;
   status: CascadeStatus;
   priority: Priority;
+  repository_id: string;
   valid_from: Date;
 }
 
@@ -107,6 +140,7 @@ export interface BitemporalTask {
   tags: string[];
   ai_metadata: Record<string, unknown>;
   maintained_by: string | null;
+  repository_id: string;
   valid_from: Date;
   valid_to: Date;
 }
@@ -119,6 +153,7 @@ export interface BitemporalTaskSummary {
   parent_id: string;
   status: TaskStatus;
   priority: Priority;
+  repository_id: string;
   valid_from: Date;
 }
 
@@ -132,6 +167,7 @@ export interface BitemporalBacklogItem {
   sprint_label: string | null;
   notes: string | null;
   maintained_by: string | null;
+  repository_id: string;
   valid_from: Date;
   valid_to: Date;
 }
@@ -156,8 +192,115 @@ export interface BitemporalItemDocumentLink {
   document_id: string;
   link_type: LinkType;
   maintained_by: string | null;
+  repository_id: string;
   valid_from: Date;
   valid_to: Date;
+}
+
+// =============================================================================
+// REPOSITORY QUERIES
+// =============================================================================
+
+export async function listRepositories(filters?: {
+  status?: RepositoryStatus;
+}): Promise<BitemporalRepositorySummary[]> {
+  try {
+    let query = `
+      SELECT DISTINCT ON (id) id, version_id, name, full_name, status, valid_from
+      FROM current_repositories
+    `;
+    const conditions: string[] = [];
+    if (filters?.status) conditions.push(`status = '${filters.status}'`);
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(" AND ")}`;
+    }
+    query += " ORDER BY id, valid_from DESC";
+    const rows = await client.unsafe(query);
+    return rows as unknown as BitemporalRepositorySummary[];
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to list repositories");
+  }
+}
+
+export async function getRepositoryById(id: string): Promise<BitemporalRepository | null> {
+  try {
+    const rows = await client`
+      SELECT id, version_id, name, full_name, description, github_url, default_branch,
+             status, settings, maintained_by, valid_from, valid_to
+      FROM current_repositories
+      WHERE id = ${id}
+      ORDER BY valid_from DESC
+      LIMIT 1
+    `;
+    if (rows.length === 0) return null;
+    return rows[0] as unknown as BitemporalRepository;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to get repository by id");
+  }
+}
+
+export async function createRepository(params: {
+  id: string;
+  name: string;
+  fullName?: string;
+  description?: string;
+  githubUrl?: string;
+  defaultBranch?: string;
+  status?: RepositoryStatus;
+  settings?: Record<string, unknown>;
+  maintainedBy?: string;
+}): Promise<string> {
+  try {
+    const rows = await client`
+      SELECT insert_repository_version(
+        ${params.id}::uuid,
+        ${params.name}::varchar,
+        ${params.fullName ?? null}::varchar,
+        ${params.description ?? null}::text,
+        ${params.githubUrl ?? null}::varchar,
+        ${params.defaultBranch ?? "main"}::varchar,
+        ${params.status ?? "active"}::varchar,
+        ${JSON.stringify(params.settings ?? {})}::jsonb,
+        ${new Date()}::timestamptz,
+        ${params.maintainedBy ?? null}::uuid
+      ) AS version_id
+    `;
+    return rows[0].version_id as string;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to create repository");
+  }
+}
+
+export async function updateRepository(params: {
+  id: string;
+  name?: string;
+  fullName?: string;
+  description?: string;
+  githubUrl?: string;
+  defaultBranch?: string;
+  status?: RepositoryStatus;
+  settings?: Record<string, unknown>;
+  maintainedBy?: string;
+}): Promise<string> {
+  try {
+    const rows = await client`
+      SELECT update_repository_version(
+        ${params.id}::uuid,
+        ${params.name ?? null}::varchar,
+        ${params.fullName ?? null}::varchar,
+        ${params.description ?? null}::text,
+        ${params.githubUrl ?? null}::varchar,
+        ${params.defaultBranch ?? null}::varchar,
+        ${params.status ?? null}::varchar,
+        ${params.settings ? JSON.stringify(params.settings) : null}::jsonb,
+        ${new Date()}::timestamptz,
+        ${params.maintainedBy ?? null}::uuid
+      ) AS version_id
+    `;
+    return rows[0].version_id as string;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to update repository");
+  }
 }
 
 // =============================================================================
@@ -169,10 +312,11 @@ export async function listFeatures(filters?: {
   priority?: Priority;
   featureType?: FeatureType;
   parentId?: string;
+  repositoryId?: string;
 }): Promise<BitemporalFeatureSummary[]> {
   try {
     let query = `
-      SELECT DISTINCT ON (id) id, version_id, title, feature_type, status, priority, valid_from
+      SELECT DISTINCT ON (id) id, version_id, title, feature_type, status, priority, repository_id, valid_from
       FROM current_features
     `;
     const conditions: string[] = [];
@@ -180,6 +324,7 @@ export async function listFeatures(filters?: {
     if (filters?.priority) conditions.push(`priority = '${filters.priority}'`);
     if (filters?.featureType) conditions.push(`feature_type = '${filters.featureType}'`);
     if (filters?.parentId) conditions.push(`parent_id = '${filters.parentId}'`);
+    if (filters?.repositoryId) conditions.push(`repository_id = '${filters.repositoryId}'`);
 
     if (conditions.length > 0) {
       query += ` WHERE ${conditions.join(" AND ")}`;
@@ -301,6 +446,7 @@ export async function createFeature(params: {
   tags?: string[];
   aiMetadata?: Record<string, unknown>;
   maintainedBy?: string;
+  repositoryId?: string;
 }): Promise<string> {
   try {
     const rows = await client`
@@ -321,7 +467,11 @@ export async function createFeature(params: {
         ${params.maintainedBy ?? null}::uuid
       ) AS version_id
     `;
-    return rows[0].version_id as string;
+    const versionId = rows[0].version_id as string;
+    if (params.repositoryId) {
+      await client`UPDATE features SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
+    }
+    return versionId;
   } catch (_error) {
     throw new ChatSDKError("bad_request:database", "Failed to create feature");
   }
@@ -373,16 +523,18 @@ export async function listBugs(filters?: {
   status?: CascadeStatus;
   priority?: Priority;
   severity?: BugSeverity;
+  repositoryId?: string;
 }): Promise<BitemporalBugSummary[]> {
   try {
     let query = `
-      SELECT DISTINCT ON (id) id, version_id, title, severity, status, priority, valid_from
+      SELECT DISTINCT ON (id) id, version_id, title, severity, status, priority, repository_id, valid_from
       FROM current_bugs
     `;
     const conditions: string[] = [];
     if (filters?.status) conditions.push(`status = '${filters.status}'`);
     if (filters?.priority) conditions.push(`priority = '${filters.priority}'`);
     if (filters?.severity) conditions.push(`severity = '${filters.severity}'`);
+    if (filters?.repositoryId) conditions.push(`repository_id = '${filters.repositoryId}'`);
 
     if (conditions.length > 0) {
       query += ` WHERE ${conditions.join(" AND ")}`;
@@ -450,6 +602,7 @@ export async function createBug(params: {
   tags?: string[];
   aiMetadata?: Record<string, unknown>;
   maintainedBy?: string;
+  repositoryId?: string;
 }): Promise<string> {
   try {
     const rows = await client`
@@ -472,7 +625,11 @@ export async function createBug(params: {
         ${params.maintainedBy ?? null}::uuid
       ) AS version_id
     `;
-    return rows[0].version_id as string;
+    const versionId = rows[0].version_id as string;
+    if (params.repositoryId) {
+      await client`UPDATE bugs SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
+    }
+    return versionId;
   } catch (_error) {
     throw new ChatSDKError("bad_request:database", "Failed to create bug");
   }
@@ -570,16 +727,18 @@ export async function listTasks(filters?: {
   parentType?: "feature" | "bug";
   parentId?: string;
   status?: TaskStatus;
+  repositoryId?: string;
 }): Promise<BitemporalTaskSummary[]> {
   try {
     let query = `
-      SELECT DISTINCT ON (id) id, version_id, title, parent_type, parent_id, status, priority, valid_from
+      SELECT DISTINCT ON (id) id, version_id, title, parent_type, parent_id, status, priority, repository_id, valid_from
       FROM current_tasks
     `;
     const conditions: string[] = [];
     if (filters?.parentType) conditions.push(`parent_type = '${filters.parentType}'`);
     if (filters?.parentId) conditions.push(`parent_id = '${filters.parentId}'`);
     if (filters?.status) conditions.push(`status = '${filters.status}'`);
+    if (filters?.repositoryId) conditions.push(`repository_id = '${filters.repositoryId}'`);
 
     if (conditions.length > 0) {
       query += ` WHERE ${conditions.join(" AND ")}`;
@@ -623,6 +782,7 @@ export async function createTask(params: {
   tags?: string[];
   aiMetadata?: Record<string, unknown>;
   maintainedBy?: string;
+  repositoryId?: string;
 }): Promise<string> {
   try {
     const rows = await client`
@@ -642,7 +802,11 @@ export async function createTask(params: {
         ${params.maintainedBy ?? null}::uuid
       ) AS version_id
     `;
-    return rows[0].version_id as string;
+    const versionId = rows[0].version_id as string;
+    if (params.repositoryId) {
+      await client`UPDATE tasks SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
+    }
+    return versionId;
   } catch (_error) {
     throw new ChatSDKError("bad_request:database", "Failed to create task");
   }
@@ -689,6 +853,7 @@ export async function updateTask(params: {
 export async function getBacklog(filters?: {
   sprintLabel?: string;
   itemType?: "feature" | "bug";
+  repositoryId?: string;
 }): Promise<BacklogItemWithDetails[]> {
   try {
     let query = `
@@ -743,6 +908,7 @@ export async function getBacklog(filters?: {
     const conditions: string[] = [];
     if (filters?.sprintLabel) conditions.push(`bi.sprint_label = '${filters.sprintLabel}'`);
     if (filters?.itemType) conditions.push(`bi.item_type = '${filters.itemType}'`);
+    if (filters?.repositoryId) conditions.push(`bi.repository_id = '${filters.repositoryId}'`);
 
     if (conditions.length > 0) {
       query += ` AND ${conditions.join(" AND ")}`;

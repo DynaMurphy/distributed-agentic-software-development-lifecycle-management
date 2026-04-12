@@ -26,8 +26,9 @@ export async function GET(request: Request) {
     const status = searchParams.get("status") as any;
     const parentType = searchParams.get("parentType") as any;
     const parentId = searchParams.get("parentId") ?? undefined;
+    const repositoryId = searchParams.get("repositoryId") ?? undefined;
 
-    const tasks = await listTasks({ status, parentType, parentId });
+    const tasks = await listTasks({ status, parentType, parentId, repositoryId });
     return Response.json(tasks, { status: 200 });
   }
 
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
       assignedTo: body.assignedTo,
       effortEstimate: body.effortEstimate,
       tags: body.tags,
+      repositoryId: body.repositoryId,
       maintainedBy: session.user.id,
     });
 

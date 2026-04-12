@@ -27,8 +27,9 @@ export async function GET(request: Request) {
   if (!id) {
     const sprintLabel = searchParams.get("sprintLabel") ?? undefined;
     const itemType = searchParams.get("itemType") as any;
+    const repositoryId = searchParams.get("repositoryId") ?? undefined;
 
-    const backlog = await getBacklog({ sprintLabel, itemType });
+    const backlog = await getBacklog({ sprintLabel, itemType, repositoryId });
     return Response.json(backlog, { status: 200 });
   }
 

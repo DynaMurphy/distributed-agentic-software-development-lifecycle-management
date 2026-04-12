@@ -31,8 +31,9 @@ export async function GET(request: Request) {
     const priority = searchParams.get("priority") as any;
     const featureType = searchParams.get("featureType") as any;
     const parentId = searchParams.get("parentId") ?? undefined;
+    const repositoryId = searchParams.get("repositoryId") ?? undefined;
 
-    const features = await listFeatures({ status, priority, featureType, parentId });
+    const features = await listFeatures({ status, priority, featureType, parentId, repositoryId });
     return Response.json(features, { status: 200 });
   }
 
@@ -79,6 +80,7 @@ export async function POST(request: Request) {
       assignedTo: body.assignedTo,
       tags: body.tags,
       aiMetadata: body.aiMetadata,
+      repositoryId: body.repositoryId,
       maintainedBy: session.user.id,
     });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
@@ -30,6 +30,7 @@ import {
   SparklesIcon,
 } from "@/components/icons";
 import { useAIToolAction } from "@/hooks/use-ai-tool-action";
+import { useSelectedRepository } from "@/hooks/use-selected-repository";
 import {
   Tooltip,
   TooltipContent,
@@ -895,24 +896,55 @@ function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }
 }
 
 // =============================================================================
-// MEMOIZED CONTENT WRAPPER (avoids JSON.parse on every parent re-render)
+// BACKLOG CONTENT — re-fetches when selected repository changes
 // =============================================================================
 
-const BacklogContentMemo = memo(function BacklogContent({
+function BacklogContentWithRepo({
   content,
 }: {
   content: string;
 }) {
-  const parsed = useMemo(() => {
+  const { selectedRepositoryId } = useSelectedRepository();
+  const [items, setItems] = useState<BacklogItemData[] | null>(() => {
     try {
       const data = JSON.parse(content);
       return Array.isArray(data) ? data : [];
     } catch {
       return null;
     }
+  });
+  const hasFetchedRef = useRef(false);
+
+  // Re-fetch backlog when selected repository changes (and on mount)
+  useEffect(() => {
+    const repoParam = selectedRepositoryId
+      ? `?repositoryId=${selectedRepositoryId}`
+      : "";
+    fetch(`/api/backlog${repoParam}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        if (Array.isArray(data)) {
+          hasFetchedRef.current = true;
+          setItems(data);
+        }
+      })
+      .catch(() => {});
+  }, [selectedRepositoryId]);
+
+  // Sync from streaming content updates (only before first repo fetch)
+  useEffect(() => {
+    if (hasFetchedRef.current) return;
+    try {
+      const data = JSON.parse(content);
+      if (Array.isArray(data) && data.length > 0) {
+        setItems(data);
+      }
+    } catch {
+      // ignore
+    }
   }, [content]);
 
-  if (parsed === null) {
+  if (items === null) {
     return (
       <div className="p-6 text-sm text-muted-foreground">
         Unable to parse backlog data.
@@ -922,10 +954,10 @@ const BacklogContentMemo = memo(function BacklogContent({
 
   return (
     <div className="flex flex-col w-full h-full overflow-hidden">
-      <BacklogKanbanView items={parsed} />
+      <BacklogKanbanView items={items} />
     </div>
   );
-});
+}
 
 export const backlogArtifact = new Artifact<"backlog", BacklogArtifactMetadata>(
   {
@@ -938,21 +970,12 @@ export const backlogArtifact = new Artifact<"backlog", BacklogArtifactMetadata>(
         isRefreshing: false,
       });
 
-      // If opened from sidebar/chat card (not streaming), fetch backlog data
-      try {
-        const res = await fetch("/api/backlog");
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data)) {
-            setArtifact((current) => ({
-              ...current,
-              content: JSON.stringify(data),
-            }));
-          }
-        }
-      } catch {
-        // Silently fail — content may already be populated via streaming
-      }
+      // Set empty content so the component mounts and handles its own
+      // repo-aware fetching via useSelectedRepository()
+      setArtifact((current) => ({
+        ...current,
+        content: current.content || "[]",
+      }));
     },
 
     onStreamPart: ({ streamPart, setArtifact }) => {
@@ -971,7 +994,7 @@ export const backlogArtifact = new Artifact<"backlog", BacklogArtifactMetadata>(
         return <DocumentSkeleton artifactKind="text" />;
       }
 
-      return <BacklogContentMemo content={content} />;
+      return <BacklogContentWithRepo content={content} />;
     },
 
     actions: [

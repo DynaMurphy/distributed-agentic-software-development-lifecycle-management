@@ -28,6 +28,10 @@ import {
   getDocumentsForItem,
   getDocumentLinksWithTitles,
   getWorkflowStatus,
+  listRepositories,
+  getRepositoryById,
+  createRepository,
+  updateRepository,
 } from "./db.js";
 import { generateAIText } from "./ai.js";
 
@@ -121,16 +125,70 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
 
+      // ── Repository Tools ────────────────────────────────────
+      {
+        name: "list_repositories",
+        description: "List all registered repositories, optionally filtered by status.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            status: { type: "string", description: "Filter by status: active or archived" },
+          },
+        },
+      },
+      {
+        name: "read_repository",
+        description: "Read full details of a specific repository by ID.",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "Repository UUID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "create_repository",
+        description: "Register a new GitHub repository for SPLM tracking.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Repository name (e.g. owner/repo)" },
+            full_name: { type: "string", description: "Full display name" },
+            description: { type: "string", description: "Repository description" },
+            github_url: { type: "string", description: "GitHub URL (e.g. https://github.com/owner/repo)" },
+            default_branch: { type: "string", description: "Default branch name (default: main)" },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "update_repository",
+        description: "Update fields on an existing repository.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Repository UUID" },
+            name: { type: "string", description: "New name" },
+            full_name: { type: "string", description: "New full name" },
+            description: { type: "string", description: "New description" },
+            github_url: { type: "string", description: "New GitHub URL" },
+            default_branch: { type: "string", description: "New default branch" },
+            status: { type: "string", description: "Status: active or archived" },
+          },
+          required: ["id"],
+        },
+      },
+
       // ── Feature Tools ───────────────────────────────────────
       {
         name: "list_features",
-        description: "List all features, optionally filtered by status, priority, or feature_type.",
+        description: "List all features, optionally filtered by status, priority, feature_type, or repository.",
         inputSchema: {
           type: "object",
           properties: {
             status: { type: "string", description: STATUS_DESC },
             priority: { type: "string", description: PRIORITY_DESC },
             feature_type: { type: "string", description: "Filter by type: feature or sub_feature" },
+            repository_id: { type: "string", description: "Filter by repository UUID" },
           },
         },
       },
@@ -156,6 +214,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             priority: { type: "string", description: PRIORITY_DESC },
             effort_estimate: { type: "string", description: "Effort estimate: S, M, L, XL" },
             tags: { type: "array", items: { type: "string" }, description: "Tags for categorization" },
+            repository_id: { type: "string", description: "Repository UUID to scope this feature to" },
           },
           required: ["title"],
         },
@@ -183,13 +242,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // ── Bug Tools ───────────────────────────────────────────
       {
         name: "list_bugs",
-        description: "List all bugs, optionally filtered by status, severity, or priority.",
+        description: "List all bugs, optionally filtered by status, severity, priority, or repository.",
         inputSchema: {
           type: "object",
           properties: {
             status: { type: "string", description: STATUS_DESC },
             severity: { type: "string", description: "Severity: blocker, critical, major, minor, trivial" },
             priority: { type: "string", description: PRIORITY_DESC },
+            repository_id: { type: "string", description: "Filter by repository UUID" },
           },
         },
       },
@@ -217,6 +277,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             actual_behavior: { type: "string", description: "Actual behavior" },
             environment: { type: "object", description: "Environment details (JSON)" },
             tags: { type: "array", items: { type: "string" }, description: "Tags for categorization" },
+            repository_id: { type: "string", description: "Repository UUID to scope this bug to" },
           },
           required: ["title"],
         },
@@ -246,13 +307,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // ── Task Tools ──────────────────────────────────────────
       {
         name: "list_tasks",
-        description: "List tasks, optionally filtered by parent feature/bug or status.",
+        description: "List tasks, optionally filtered by parent feature/bug, status, or repository.",
         inputSchema: {
           type: "object",
           properties: {
             parent_type: { type: "string", description: "Filter by parent type: feature or bug" },
             parent_id: { type: "string", description: "Filter by parent UUID" },
             status: { type: "string", description: "Filter by status: todo, in_progress, done, blocked" },
+            repository_id: { type: "string", description: "Filter by repository UUID" },
           },
         },
       },
@@ -278,6 +340,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             priority: { type: "string", description: PRIORITY_DESC },
             effort_estimate: { type: "string", description: "Effort estimate: S, M, L, XL" },
             tags: { type: "array", items: { type: "string" }, description: "Tags" },
+            repository_id: { type: "string", description: "Repository UUID to scope this task to" },
           },
           required: ["title", "parent_type", "parent_id"],
         },
@@ -535,14 +598,64 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
+    // ── Repository Handlers ──────────────────────────────────
+
+    if (name === "list_repositories") {
+      const repos = await listRepositories({ status: args.status });
+      return { content: [{ type: "text", text: JSON.stringify(repos, null, 2) }] };
+    }
+
+    if (name === "read_repository") {
+      const repo = await getRepositoryById(args.id);
+      if (!repo) return { content: [{ type: "text", text: "Repository not found." }] };
+      return { content: [{ type: "text", text: JSON.stringify(repo, null, 2) }] };
+    }
+
+    if (name === "create_repository") {
+      if (!args.name) throw new Error("Name is required");
+      const id = crypto.randomUUID();
+      const versionId = await createRepository({
+        id,
+        name: args.name,
+        fullName: args.full_name,
+        description: args.description,
+        githubUrl: args.github_url,
+        defaultBranch: args.default_branch,
+        maintainedBy: MCP_ASSISTANT_USER_ID,
+      });
+      const repo = await getRepositoryById(id);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ created: true, id, versionId, repository: repo }, null, 2) }],
+      };
+    }
+
+    if (name === "update_repository") {
+      if (!args.id) throw new Error("ID is required");
+      const versionId = await updateRepository({
+        id: args.id,
+        name: args.name,
+        fullName: args.full_name,
+        description: args.description,
+        githubUrl: args.github_url,
+        defaultBranch: args.default_branch,
+        status: args.status,
+        maintainedBy: MCP_ASSISTANT_USER_ID,
+      });
+      const repo = await getRepositoryById(args.id);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ updated: true, versionId, repository: repo }, null, 2) }],
+      };
+    }
+
     // ── Feature Handlers ────────────────────────────────────
 
     if (name === "list_features") {
-      let sql = 'SELECT DISTINCT ON (id) id, title, feature_type, status, priority, valid_from FROM current_features WHERE 1=1';
+      let sql = 'SELECT DISTINCT ON (id) id, title, feature_type, status, priority, repository_id, valid_from FROM current_features WHERE 1=1';
       const params: any[] = [];
       if (args.status) { params.push(args.status); sql += ` AND status = $${params.length}`; }
       if (args.priority) { params.push(args.priority); sql += ` AND priority = $${params.length}`; }
       if (args.feature_type) { params.push(args.feature_type); sql += ` AND feature_type = $${params.length}`; }
+      if (args.repository_id) { params.push(args.repository_id); sql += ` AND repository_id = $${params.length}`; }
       sql += ' ORDER BY id, valid_from DESC';
       const result = await query(sql, params);
       return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
@@ -574,6 +687,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         priority: args.priority,
         effortEstimate: args.effort_estimate,
         tags: args.tags,
+        repositoryId: args.repository_id,
         maintainedBy: MCP_ASSISTANT_USER_ID,
       });
 
@@ -614,11 +728,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // ── Bug Handlers ────────────────────────────────────────
 
     if (name === "list_bugs") {
-      let sql = 'SELECT DISTINCT ON (id) id, title, severity, status, priority, valid_from FROM current_bugs WHERE 1=1';
+      let sql = 'SELECT DISTINCT ON (id) id, title, severity, status, priority, repository_id, valid_from FROM current_bugs WHERE 1=1';
       const params: any[] = [];
       if (args.status) { params.push(args.status); sql += ` AND status = $${params.length}`; }
       if (args.severity) { params.push(args.severity); sql += ` AND severity = $${params.length}`; }
       if (args.priority) { params.push(args.priority); sql += ` AND priority = $${params.length}`; }
+      if (args.repository_id) { params.push(args.repository_id); sql += ` AND repository_id = $${params.length}`; }
       sql += ' ORDER BY id, valid_from DESC';
       const result = await query(sql, params);
       return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
@@ -651,6 +766,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         actualBehavior: args.actual_behavior,
         environment: args.environment,
         tags: args.tags,
+        repositoryId: args.repository_id,
         maintainedBy: MCP_ASSISTANT_USER_ID,
       });
 
@@ -697,6 +813,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         parentType: args.parent_type,
         parentId: args.parent_id,
         status: args.status,
+        repositoryId: args.repository_id,
       });
       return { content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }] };
     }
@@ -721,6 +838,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         priority: args.priority,
         effortEstimate: args.effort_estimate,
         tags: args.tags,
+        repositoryId: args.repository_id,
         maintainedBy: MCP_ASSISTANT_USER_ID,
       });
       const task = await getTaskById(id);

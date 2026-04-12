@@ -33,15 +33,21 @@ export interface BitemporalDocumentSummary {
 /**
  * List all current bitemporal documents (latest transaction-time state).
  */
-export async function listBitemporalDocuments(): Promise<
+export async function listBitemporalDocuments(filters?: {
+  repositoryId?: string;
+}): Promise<
   BitemporalDocumentSummary[]
 > {
   try {
-    const rows = await client`
+    let query = `
       SELECT DISTINCT ON (id) id, version_id, title, valid_from
       FROM current_documents
-      ORDER BY id, valid_from DESC
     `;
+    if (filters?.repositoryId) {
+      query += ` WHERE repository_id = '${filters.repositoryId}'`;
+    }
+    query += ` ORDER BY id, valid_from DESC`;
+    const rows = await client.unsafe(query);
     return rows as unknown as BitemporalDocumentSummary[];
   } catch (_error) {
     throw new ChatSDKError(

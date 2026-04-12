@@ -29,8 +29,9 @@ export async function GET(request: Request) {
     const status = searchParams.get("status") as any;
     const priority = searchParams.get("priority") as any;
     const severity = searchParams.get("severity") as any;
+    const repositoryId = searchParams.get("repositoryId") ?? undefined;
 
-    const bugs = await listBugs({ status, priority, severity });
+    const bugs = await listBugs({ status, priority, severity, repositoryId });
     return Response.json(bugs, { status: 200 });
   }
 
@@ -76,6 +77,7 @@ export async function POST(request: Request) {
       assignedTo: body.assignedTo,
       tags: body.tags,
       aiMetadata: body.aiMetadata,
+      repositoryId: body.repositoryId,
       maintainedBy: session.user.id,
     });
 

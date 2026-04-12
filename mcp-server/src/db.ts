@@ -52,6 +52,91 @@ export type BugSeverity = "blocker" | "critical" | "major" | "minor" | "trivial"
 export type TaskStatus = "todo" | "in_progress" | "done" | "blocked";
 export type ItemType = "feature" | "bug" | "task";
 export type LinkType = "specification" | "test_plan" | "design" | "reference";
+export type RepositoryStatus = "active" | "archived";
+
+export const DEFAULT_REPOSITORY_ID = "00000000-0000-0000-0000-000000000001";
+
+// =============================================================================
+// REPOSITORY HELPERS
+// =============================================================================
+
+export async function listRepositories(filters?: { status?: string }) {
+  let sql = `SELECT DISTINCT ON (id) id, version_id, name, full_name, status, valid_from
+             FROM current_repositories WHERE 1=1`;
+  const params: any[] = [];
+  if (filters?.status) { params.push(filters.status); sql += ` AND status = $${params.length}`; }
+  sql += ' ORDER BY id, valid_from DESC';
+  const result = await query(sql, params);
+  return result.rows;
+}
+
+export async function getRepositoryById(id: string) {
+  const result = await query(
+    `SELECT id, version_id, name, full_name, description, github_url, default_branch,
+            status, settings, maintained_by, valid_from, valid_to
+     FROM current_repositories WHERE id = $1 ORDER BY valid_from DESC LIMIT 1`,
+    [id]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function createRepository(params: {
+  id: string;
+  name: string;
+  fullName?: string;
+  description?: string;
+  githubUrl?: string;
+  defaultBranch?: string;
+  status?: string;
+  settings?: Record<string, unknown>;
+  maintainedBy?: string;
+}): Promise<string> {
+  const result = await query(
+    `SELECT insert_repository_version($1::uuid, $2::varchar, $3::varchar, $4::text, $5::varchar, $6::varchar, $7::varchar, $8::jsonb, $9::timestamptz, $10::uuid) AS version_id`,
+    [
+      params.id,
+      params.name,
+      params.fullName ?? null,
+      params.description ?? null,
+      params.githubUrl ?? null,
+      params.defaultBranch ?? "main",
+      params.status ?? "active",
+      JSON.stringify(params.settings ?? {}),
+      new Date().toISOString(),
+      params.maintainedBy ?? null,
+    ]
+  );
+  return result.rows[0].version_id as string;
+}
+
+export async function updateRepository(params: {
+  id: string;
+  name?: string;
+  fullName?: string;
+  description?: string;
+  githubUrl?: string;
+  defaultBranch?: string;
+  status?: string;
+  settings?: Record<string, unknown>;
+  maintainedBy?: string;
+}): Promise<string> {
+  const result = await query(
+    `SELECT update_repository_version($1::uuid, $2::varchar, $3::varchar, $4::text, $5::varchar, $6::varchar, $7::varchar, $8::jsonb, $9::timestamptz, $10::uuid) AS version_id`,
+    [
+      params.id,
+      params.name ?? null,
+      params.fullName ?? null,
+      params.description ?? null,
+      params.githubUrl ?? null,
+      params.defaultBranch ?? null,
+      params.status ?? null,
+      params.settings ? JSON.stringify(params.settings) : null,
+      new Date().toISOString(),
+      params.maintainedBy ?? null,
+    ]
+  );
+  return result.rows[0].version_id as string;
+}
 
 // =============================================================================
 // FEATURE HELPERS
@@ -71,6 +156,7 @@ export async function createFeature(params: {
   tags?: string[];
   aiMetadata?: Record<string, unknown>;
   maintainedBy?: string;
+  repositoryId?: string;
 }): Promise<string> {
   const result = await query(
     `SELECT insert_feature_version($1::uuid, $2::varchar, $3::text, $4::varchar, $5::uuid, $6::varchar, $7::varchar, $8::varchar, $9::uuid, $10::uuid, $11::jsonb, $12::jsonb, $13::timestamptz, $14::uuid) AS version_id`,
@@ -87,11 +173,15 @@ export async function createFeature(params: {
       params.assignedTo ?? null,
       JSON.stringify(params.tags ?? []),
       JSON.stringify(params.aiMetadata ?? {}),
-      new Date().toISOString(), // p_valid_from
+      new Date().toISOString(),
       params.maintainedBy ?? null,
     ]
   );
-  return result.rows[0].version_id as string;
+  const versionId = result.rows[0].version_id as string;
+  if (params.repositoryId) {
+    await query(`UPDATE features SET repository_id = $1::uuid WHERE version_id = $2::uuid`, [params.repositoryId, versionId]);
+  }
+  return versionId;
 }
 
 export async function updateFeature(params: {
@@ -168,6 +258,7 @@ export async function createBug(params: {
   tags?: string[];
   aiMetadata?: Record<string, unknown>;
   maintainedBy?: string;
+  repositoryId?: string;
 }): Promise<string> {
   const result = await query(
     `SELECT insert_bug_version($1::uuid, $2::varchar, $3::text, $4::varchar, $5::varchar, $6::varchar, $7::text, $8::text, $9::text, $10::jsonb, $11::uuid, $12::uuid, $13::jsonb, $14::jsonb, $15::timestamptz, $16::uuid) AS version_id`,
@@ -186,11 +277,15 @@ export async function createBug(params: {
       params.assignedTo ?? null,
       JSON.stringify(params.tags ?? []),
       JSON.stringify(params.aiMetadata ?? {}),
-      new Date().toISOString(), // p_valid_from
+      new Date().toISOString(),
       params.maintainedBy ?? null,
     ]
   );
-  return result.rows[0].version_id as string;
+  const versionId = result.rows[0].version_id as string;
+  if (params.repositoryId) {
+    await query(`UPDATE bugs SET repository_id = $1::uuid WHERE version_id = $2::uuid`, [params.repositoryId, versionId]);
+  }
+  return versionId;
 }
 
 export async function updateBug(params: {
@@ -251,13 +346,15 @@ export async function listTasks(filters?: {
   parentType?: string;
   parentId?: string;
   status?: string;
+  repositoryId?: string;
 }) {
-  let sql = `SELECT DISTINCT ON (id) id, version_id, title, parent_type, parent_id, status, priority, valid_from
+  let sql = `SELECT DISTINCT ON (id) id, version_id, title, parent_type, parent_id, status, priority, repository_id, valid_from
              FROM current_tasks WHERE 1=1`;
   const params: any[] = [];
   if (filters?.parentType) { params.push(filters.parentType); sql += ` AND parent_type = $${params.length}`; }
   if (filters?.parentId) { params.push(filters.parentId); sql += ` AND parent_id = $${params.length}`; }
   if (filters?.status) { params.push(filters.status); sql += ` AND status = $${params.length}`; }
+  if (filters?.repositoryId) { params.push(filters.repositoryId); sql += ` AND repository_id = $${params.length}`; }
   sql += ' ORDER BY id, valid_from DESC';
   const result = await query(sql, params);
   return result.rows;
@@ -286,6 +383,7 @@ export async function createTask(params: {
   tags?: string[];
   aiMetadata?: Record<string, unknown>;
   maintainedBy?: string;
+  repositoryId?: string;
 }): Promise<string> {
   const result = await query(
     `SELECT insert_task_version($1::uuid, $2::varchar, $3::text, $4::varchar, $5::uuid, $6::varchar, $7::varchar, $8::varchar, $9::uuid, $10::jsonb, $11::jsonb, $12::timestamptz, $13::uuid) AS version_id`,
@@ -301,11 +399,15 @@ export async function createTask(params: {
       params.assignedTo ?? null,
       JSON.stringify(params.tags ?? []),
       JSON.stringify(params.aiMetadata ?? {}),
-      new Date().toISOString(), // p_valid_from
+      new Date().toISOString(),
       params.maintainedBy ?? null,
     ]
   );
-  return result.rows[0].version_id as string;
+  const versionId = result.rows[0].version_id as string;
+  if (params.repositoryId) {
+    await query(`UPDATE tasks SET repository_id = $1::uuid WHERE version_id = $2::uuid`, [params.repositoryId, versionId]);
+  }
+  return versionId;
 }
 
 export async function updateTask(params: {
