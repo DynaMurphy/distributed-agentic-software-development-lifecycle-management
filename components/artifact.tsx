@@ -13,7 +13,8 @@ import {
   useState,
 } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { useDebounceCallback, useWindowSize } from "usehooks-ts";
+import { useDebounceCallback } from "usehooks-ts";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { backlogArtifact } from "@/artifacts/backlog/client";
 import { bugArtifact } from "@/artifacts/bug/client";
 import { codeArtifact } from "@/artifacts/code/client";
@@ -28,21 +29,12 @@ import type { Attachment, ChatMessage } from "@/lib/types";
 import { fetcher } from "@/lib/utils";
 import { ArtifactActions } from "./artifact-actions";
 import { ArtifactCloseButton } from "./artifact-close-button";
-import { ArtifactMessages } from "./artifact-messages";
 import { InlineEditableTitle } from "./inline-editable-title";
-import { MultimodalInput } from "./multimodal-input";
+import { RightChatPanel } from "./right-chat-panel";
 import { Toolbar } from "./toolbar";
-import { useSidebar, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX } from "./ui/sidebar";
 import { VersionFooter } from "./version-footer";
 import { VersionHistoryPanel } from "./version-history-panel";
 import type { VisibilityType } from "./visibility-selector";
-
-/** Parse a CSS sidebar width value (e.g. "320px", "16rem") to a pixel number. */
-function parseSidebarWidth(value: string): number {
-  if (value.endsWith("px")) return Number.parseInt(value, 10) || 256;
-  if (value.endsWith("rem")) return (Number.parseFloat(value) || 16) * 16;
-  return 256;
-}
 
 /** Extract "Updated … ago" from SPLM artifact JSON content (bugs, features, backlog). */
 function SplmMetadataLine({ content }: { content: string }) {
@@ -167,8 +159,7 @@ function PureArtifact({
     return documents.at(-1) ?? null;
   }, [documents, currentVersionIndex]);
 
-  const { open: isSidebarOpen, sidebarWidth, setSidebarWidth } = useSidebar();
-  const chatPanelWidth = parseSidebarWidth(sidebarWidth);
+  const [rightPanelWidth, setRightPanelWidth] = useState(360);
 
   useEffect(() => {
     if (documents && documents.length > 0) {
@@ -399,8 +390,7 @@ function PureArtifact({
       ? currentVersionIndex === documents.length - 1
       : true;
 
-  const { width: windowWidth, height: windowHeight } = useWindowSize();
-  const isMobile = windowWidth ? windowWidth < 768 : false;
+  const isMobile = useIsMobile();
 
   const artifactDefinition = artifactDefinitions.find(
     (definition) => definition.kind === artifact.kind
@@ -425,199 +415,13 @@ function PureArtifact({
       {artifact.isVisible && (
         <motion.div
           animate={{ opacity: 1 }}
-          className="fixed top-0 left-0 z-50 flex h-dvh w-dvw flex-row bg-transparent"
+          className="absolute inset-0 z-10 flex flex-row overflow-hidden"
           data-testid="artifact"
-          exit={{ opacity: 0, transition: { delay: 0.4 } }}
-          initial={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          initial={{ opacity: 0 }}
         >
-          {!isMobile && (
-            <motion.div
-              animate={{ width: windowWidth, right: 0 }}
-              className="fixed h-dvh bg-background"
-              exit={{
-                width: isSidebarOpen ? windowWidth - chatPanelWidth : windowWidth,
-                right: 0,
-              }}
-              initial={{
-                width: isSidebarOpen ? windowWidth - chatPanelWidth : windowWidth,
-                right: 0,
-              }}
-            />
-          )}
-
-          {!isMobile && (
-            <motion.div
-              animate={{
-                opacity: 1,
-                x: 0,
-                scale: 1,
-                transition: {
-                  delay: 0.1,
-                  type: "spring",
-                  stiffness: 300,
-                  damping: 30,
-                },
-              }}
-              className="relative h-dvh shrink-0 bg-muted dark:bg-background"
-              style={{ width: chatPanelWidth }}
-              exit={{
-                opacity: 0,
-                x: 0,
-                scale: 1,
-                transition: { duration: 0 },
-              }}
-              initial={{ opacity: 0, x: 10, scale: 1 }}
-            >
-              <AnimatePresence>
-                {!isCurrentVersion && (
-                  <motion.div
-                    animate={{ opacity: 1 }}
-                    className="absolute top-0 left-0 z-50 h-dvh bg-zinc-900/50"
-                    style={{ width: chatPanelWidth }}
-                    exit={{ opacity: 0 }}
-                    initial={{ opacity: 0 }}
-                  />
-                )}
-              </AnimatePresence>
-
-              <div className="flex h-full flex-col items-center justify-between">
-                <ArtifactMessages
-                  addToolApprovalResponse={addToolApprovalResponse}
-                  artifactStatus={artifact.status}
-                  chatId={chatId}
-                  isReadonly={isReadonly}
-                  messages={messages}
-                  regenerate={regenerate}
-                  setMessages={setMessages}
-                  status={status}
-                  votes={votes}
-                />
-
-                <div className="relative flex w-full flex-row items-end gap-2 px-4 pb-4">
-                  <MultimodalInput
-                    attachments={attachments}
-                    chatId={chatId}
-                    className="bg-background dark:bg-muted"
-                    input={input}
-                    messages={messages}
-                    selectedModelId={selectedModelId}
-                    selectedVisibilityType={selectedVisibilityType}
-                    sendMessage={sendMessage}
-                    setAttachments={setAttachments}
-                    setInput={setInput}
-                    setMessages={setMessages}
-                    status={status}
-                    stop={stop}
-                  />
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {/* Resize divider between chat panel and artifact panel */}
-          {!isMobile && (
-            <div
-              className="fixed top-0 z-[60] h-dvh w-1 cursor-col-resize select-none"
-              style={{ left: chatPanelWidth - 2 }}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const startX = e.clientX;
-                const startWidth = chatPanelWidth;
-
-                const handleMouseMove = (moveEvent: MouseEvent) => {
-                  const delta = moveEvent.clientX - startX;
-                  const newWidth = Math.min(
-                    SIDEBAR_WIDTH_MAX,
-                    Math.max(SIDEBAR_WIDTH_MIN, startWidth + delta)
-                  );
-                  setSidebarWidth(`${newWidth}px`);
-                };
-
-                const handleMouseUp = () => {
-                  window.document.removeEventListener("mousemove", handleMouseMove);
-                  window.document.removeEventListener("mouseup", handleMouseUp);
-                  window.document.body.style.cursor = "";
-                  window.document.body.style.userSelect = "";
-                };
-
-                window.document.body.style.cursor = "col-resize";
-                window.document.body.style.userSelect = "none";
-                window.document.addEventListener("mousemove", handleMouseMove);
-                window.document.addEventListener("mouseup", handleMouseUp);
-              }}
-            >
-              <div className="mx-auto h-full w-[2px] transition-colors hover:bg-sidebar-border" />
-            </div>
-          )}
-
-          <motion.div
-            animate={
-              isMobile
-                ? {
-                    opacity: 1,
-                    x: 0,
-                    y: 0,
-                    height: windowHeight,
-                    width: windowWidth ? windowWidth : "calc(100dvw)",
-                    borderRadius: 0,
-                    transition: {
-                      delay: 0,
-                      type: "spring",
-                      stiffness: 300,
-                      damping: 30,
-                      duration: 0.8,
-                    },
-                  }
-                : {
-                    opacity: 1,
-                    x: chatPanelWidth,
-                    y: 0,
-                    height: windowHeight,
-                    width: windowWidth
-                      ? windowWidth - chatPanelWidth
-                      : `calc(100dvw - ${chatPanelWidth}px)`,
-                    borderRadius: 0,
-                    transition: {
-                      delay: 0,
-                      type: "spring",
-                      stiffness: 300,
-                      damping: 30,
-                      duration: 0.8,
-                    },
-                  }
-            }
-            className="fixed flex h-dvh flex-col overflow-y-scroll border-zinc-200 bg-background md:border-l dark:border-zinc-700 dark:bg-muted"
-            exit={{
-              opacity: 0,
-              scale: 0.5,
-              transition: {
-                delay: 0.1,
-                type: "spring",
-                stiffness: 600,
-                damping: 30,
-              },
-            }}
-            initial={
-              isMobile
-                ? {
-                    opacity: 1,
-                    x: artifact.boundingBox.left,
-                    y: artifact.boundingBox.top,
-                    height: artifact.boundingBox.height,
-                    width: artifact.boundingBox.width,
-                    borderRadius: 50,
-                  }
-                : {
-                    opacity: 1,
-                    x: artifact.boundingBox.left,
-                    y: artifact.boundingBox.top,
-                    height: artifact.boundingBox.height,
-                    width: artifact.boundingBox.width,
-                    borderRadius: 50,
-                  }
-            }
-          >
+          {/* Center content panel */}
+          <div className="relative flex flex-1 flex-col overflow-hidden bg-background dark:bg-muted">
             <div className="flex flex-row items-start justify-between p-2">
               <div className="flex flex-row items-start gap-4">
                 <ArtifactCloseButton />
@@ -742,7 +546,33 @@ function PureArtifact({
                 />
               )}
             </AnimatePresence>
-          </motion.div>
+          </div>
+
+          {/* Right chat panel — desktop only */}
+          {!isMobile && (
+            <RightChatPanel
+              addToolApprovalResponse={addToolApprovalResponse}
+              artifactStatus={artifact.status}
+              attachments={attachments}
+              chatId={chatId}
+              input={input}
+              isCurrentVersion={isCurrentVersion}
+              isReadonly={isReadonly}
+              messages={messages}
+              onPanelWidthChange={setRightPanelWidth}
+              panelWidth={rightPanelWidth}
+              regenerate={regenerate}
+              selectedModelId={selectedModelId}
+              selectedVisibilityType={selectedVisibilityType}
+              sendMessage={sendMessage}
+              setAttachments={setAttachments}
+              setInput={setInput}
+              setMessages={setMessages}
+              status={status}
+              stop={stop}
+              votes={votes}
+            />
+          )}
         </motion.div>
       )}
     </AnimatePresence>
