@@ -10,6 +10,7 @@ import {
   splmAgents,
   serverPermissionHandler,
 } from "@/lib/copilot";
+import { getSkillDirectories } from "@/lib/skills";
 import { systemPrompt } from "@/lib/ai/prompts";
 import {
   getChatById,
@@ -123,6 +124,9 @@ export async function POST(request: Request) {
             customAgents: splmAgents,
             ...(agent ? { agent } : {}),
             workingDirectory: process.cwd(),
+            skillDirectories: getSkillDirectories({
+              hubRoot: process.cwd(),
+            }),
             streaming: true,
             systemMessage: {
               mode: "append",
@@ -150,17 +154,17 @@ export async function POST(request: Request) {
 
         // Activity-based timeout: resets on every SDK event so long-running
         // agent tasks don't time out while actively working.
-        const IDLE_TIMEOUT = 120_000; // 2 min inactivity
-        const MAX_TIMEOUT = 300_000; // 5 min absolute max
+        const IDLE_TIMEOUT = 180_000; // 3 min inactivity
+        const MAX_TIMEOUT = 900_000; // 15 min absolute max
         const startTime = Date.now();
 
         const idlePromise = new Promise<void>((resolve, reject) => {
           let idleTimer = setTimeout(() => {
-            reject(new Error("Copilot session timed out (no activity for 2 min)"));
+            reject(new Error("Copilot session timed out (no activity for 3 min)"));
           }, IDLE_TIMEOUT);
 
           const absoluteTimer = setTimeout(() => {
-            reject(new Error("Copilot session reached maximum duration (5 min)"));
+            reject(new Error("Copilot session reached maximum duration (15 min)"));
           }, MAX_TIMEOUT);
 
           // Reset the idle timer whenever the agent shows activity
@@ -168,7 +172,7 @@ export async function POST(request: Request) {
             clearTimeout(idleTimer);
             if (Date.now() - startTime < MAX_TIMEOUT - IDLE_TIMEOUT) {
               idleTimer = setTimeout(() => {
-                reject(new Error("Copilot session timed out (no activity for 2 min)"));
+                reject(new Error("Copilot session timed out (no activity for 3 min)"));
               }, IDLE_TIMEOUT);
             }
           };
@@ -207,18 +211,22 @@ export async function POST(request: Request) {
         };
 
         // --- Status streaming: show agent activity in the UI ---
+        // Uses a single continuously-appended status text part.
+        // Tool starts/completions are condensed to avoid a wall of lines.
 
-        // Track whether we're currently inside a status block that needs closing
         let statusPartOpen = false;
         const statusPartId = generateId();
 
+        // Track active tools to show a concise running count
+        const activeTools = new Map<string, string>(); // toolCallId -> toolName
+        let lastStatusLine = ""; // avoid duplicates
+
         const writeStatusUpdate = (text: string) => {
+          if (text === lastStatusLine) return; // deduplicate
+          lastStatusLine = text;
           ensureMessageStarted();
-          // If we had a text part open, close it, write status, reopen text
           if (!statusPartOpen) {
-            // Close current text part temporarily
             dataStream.write({ type: "text-end", id: textPartId });
-            // Open a new text part for the status
             dataStream.write({ type: "text-start", id: statusPartId });
             statusPartOpen = true;
           }
@@ -228,13 +236,13 @@ export async function POST(request: Request) {
         const closeStatusAndResumeText = () => {
           if (statusPartOpen) {
             dataStream.write({ type: "text-end", id: statusPartId });
-            // Re-open the main text part
             dataStream.write({ type: "text-start", id: textPartId });
             statusPartOpen = false;
+            lastStatusLine = "";
           }
         };
 
-        // Stream agent intent
+        // Stream agent intent — the most useful status line
         copilotSession.on("assistant.intent", (event: any) => {
           const intent = event.data?.intent;
           if (intent) {
@@ -242,15 +250,22 @@ export async function POST(request: Request) {
           }
         });
 
-        // Stream tool execution start
+        // Tool start: show tool name, track it
         copilotSession.on("tool.execution_start", (event) => {
           const toolName = event.data.toolName;
           const mcpServer = (event.data as any).mcpServerName;
           const label = mcpServer ? `${mcpServer}/${toolName}` : toolName;
-          writeStatusUpdate(`\n\n> ⚙️ Running tool: \`${label}\`\n\n`);
+          activeTools.set(event.data.toolCallId, label);
+          // Only show tool name, not the full blockquote per tool
+          if (activeTools.size <= 3) {
+            writeStatusUpdate(`\n> ⚙️ \`${label}\`\n`);
+          } else {
+            // When many tools run at once, just show count
+            writeStatusUpdate(`\n> ⚙️ Running ${activeTools.size} tools…\n`);
+          }
         });
 
-        // Stream tool progress
+        // Tool progress — only show if there's useful text
         copilotSession.on("tool.execution_progress", (event: any) => {
           const message = event.data?.message ?? event.data?.status;
           if (message) {
@@ -258,20 +273,21 @@ export async function POST(request: Request) {
           }
         });
 
-        // Stream tool completion
+        // Tool complete: remove from active set. Only surface failures.
         copilotSession.on("tool.execution_complete", (event) => {
-          const success = event.data.success;
-          const toolCallId = event.data.toolCallId;
-          writeStatusUpdate(`\n> ${success ? "✅" : "❌"} Tool ${toolCallId.slice(0, 8)}… ${success ? "completed" : "failed"}\n\n`);
+          activeTools.delete(event.data.toolCallId);
+          if (!event.data.success) {
+            writeStatusUpdate(`\n> ❌ Tool failed\n`);
+          }
         });
 
-        // Stream subagent events
+        // Subagent events
         copilotSession.on("subagent.started" as any, (event: any) => {
           const agentName = event.data?.agentName ?? event.data?.name ?? "sub-agent";
-          writeStatusUpdate(`\n\n> 🤖 Delegating to ${agentName}…\n\n`);
+          writeStatusUpdate(`\n\n> 🤖 Delegating to **${agentName}**…\n\n`);
         });
 
-        copilotSession.on("subagent.completed" as any, (event: any) => {
+        copilotSession.on("subagent.completed" as any, () => {
           writeStatusUpdate(`\n> ✅ Sub-agent completed\n\n`);
         });
 
