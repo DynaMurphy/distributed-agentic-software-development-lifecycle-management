@@ -21,7 +21,10 @@ import { codeArtifact } from "@/artifacts/code/client";
 import { featureArtifact } from "@/artifacts/feature/client";
 import { imageArtifact } from "@/artifacts/image/client";
 import { sheetArtifact } from "@/artifacts/sheet/client";
+import { skillArtifact } from "@/artifacts/skill/client";
 import { specArtifact } from "@/artifacts/spec/client";
+import { repositoryArtifact } from "@/artifacts/repository/client";
+import { templateArtifact } from "@/artifacts/template/client";
 import { textArtifact } from "@/artifacts/text/client";
 import { useArtifact } from "@/hooks/use-artifact";
 import type { Document, Vote } from "@/lib/db/schema";
@@ -64,6 +67,9 @@ export const artifactDefinitions = [
   featureArtifact,
   bugArtifact,
   backlogArtifact,
+  skillArtifact,
+  templateArtifact,
+  repositoryArtifact,
 ];
 export type ArtifactKind = (typeof artifactDefinitions)[number]["kind"];
 
@@ -119,7 +125,7 @@ function PureArtifact({
 }) {
   const { artifact, setArtifact, metadata, setMetadata } = useArtifact();
 
-  const splmKinds = ["feature", "bug", "backlog"];
+  const splmKinds = ["feature", "bug", "backlog", "skill", "template", "repository"];
   const isSplmArtifact = splmKinds.includes(artifact.kind);
 
   // Guard against invalid / placeholder document IDs ("init", literal "undefined")

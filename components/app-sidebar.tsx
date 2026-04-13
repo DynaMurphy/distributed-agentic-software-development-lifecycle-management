@@ -1,8 +1,13 @@
 "use client";
 
 import {
+  BrainCircuitIcon,
+  BugIcon,
+  FileTextIcon,
+  GitBranchIcon,
   PanelLeftIcon,
   PenSquareIcon,
+  SparklesIcon,
   TrashIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -17,6 +22,7 @@ import {
 } from "@/components/sidebar-history";
 import { SidebarSPLM } from "@/components/sidebar-splm";
 import { SidebarUserNav } from "@/components/sidebar-user-nav";
+import { useArtifact } from "@/hooks/use-artifact";
 import {
   Sidebar,
   SidebarContent,
@@ -46,6 +52,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 export function AppSidebar({ user }: { user: User | undefined }) {
   const router = useRouter();
   const { open, setOpenMobile, toggleSidebar } = useSidebar();
+  const { setArtifact } = useArtifact();
   const { mutate } = useSWRConfig();
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
 
@@ -124,6 +131,115 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                       <span>Delete all chats</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
+                )}
+                {user && (
+                  <>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        onClick={() => {
+                          setOpenMobile(false);
+                          setArtifact((current) => ({
+                            ...current,
+                            documentId: "skills-browser",
+                            kind: "skill" as const,
+                            title: "Skills Browser",
+                            content: "",
+                            isVisible: true,
+                            status: "idle",
+                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
+                          }));
+                        }}
+                        tooltip="Skills Browser"
+                      >
+                        <BrainCircuitIcon />
+                        <span>Skills</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        onClick={() => {
+                          setOpenMobile(false);
+                          setArtifact((current) => ({
+                            ...current,
+                            documentId: "templates-browser",
+                            kind: "template" as const,
+                            title: "Template Editor",
+                            content: "",
+                            isVisible: true,
+                            status: "idle",
+                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
+                          }));
+                        }}
+                        tooltip="Template Editor"
+                      >
+                        <FileTextIcon />
+                        <span>Templates</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        onClick={() => {
+                          setOpenMobile(false);
+                          setArtifact((current) => ({
+                            ...current,
+                            documentId: "features-browser",
+                            kind: "feature" as const,
+                            title: "Features",
+                            content: "",
+                            isVisible: true,
+                            status: "idle",
+                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
+                          }));
+                        }}
+                        tooltip="Features"
+                      >
+                        <SparklesIcon />
+                        <span>Features</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        onClick={() => {
+                          setOpenMobile(false);
+                          setArtifact((current) => ({
+                            ...current,
+                            documentId: "bugs-browser",
+                            kind: "bug" as const,
+                            title: "Bugs",
+                            content: "",
+                            isVisible: true,
+                            status: "idle",
+                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
+                          }));
+                        }}
+                        tooltip="Bugs"
+                      >
+                        <BugIcon />
+                        <span>Bugs</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        onClick={() => {
+                          setOpenMobile(false);
+                          setArtifact((current) => ({
+                            ...current,
+                            documentId: "repositories-browser",
+                            kind: "repository" as const,
+                            title: "Repositories",
+                            content: "",
+                            isVisible: true,
+                            status: "idle",
+                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
+                          }));
+                        }}
+                        tooltip="Repositories"
+                      >
+                        <GitBranchIcon />
+                        <span>Repositories</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </>
                 )}
               </SidebarMenu>
             </SidebarGroupContent>
