@@ -3,6 +3,17 @@ import { initialArtifactData, useArtifact } from "@/hooks/use-artifact";
 import { CrossIcon } from "./icons";
 import { Button } from "./ui/button";
 
+const BROWSER_PARENT_KINDS: Record<
+  string,
+  { kind: string; documentId: string; title: string }
+> = {
+  spec: {
+    kind: "document",
+    documentId: "documents-browser",
+    title: "Documents",
+  },
+};
+
 function PureArtifactCloseButton() {
   const { setArtifact } = useArtifact();
 
@@ -11,14 +22,25 @@ function PureArtifactCloseButton() {
       className="h-fit p-2 dark:hover:bg-zinc-700"
       data-testid="artifact-close-button"
       onClick={() => {
-        setArtifact((currentArtifact) =>
-          currentArtifact.status === "streaming"
-            ? {
-                ...currentArtifact,
-                isVisible: false,
-              }
-            : { ...initialArtifactData, status: "idle" }
-        );
+        setArtifact((currentArtifact) => {
+          if (currentArtifact.status === "streaming") {
+            return { ...currentArtifact, isVisible: false };
+          }
+
+          const parentBrowser = BROWSER_PARENT_KINDS[currentArtifact.kind];
+          if (parentBrowser) {
+            return {
+              ...currentArtifact,
+              documentId: parentBrowser.documentId,
+              kind: parentBrowser.kind as any,
+              title: parentBrowser.title,
+              content: "",
+              status: "idle",
+            };
+          }
+
+          return { ...initialArtifactData, status: "idle" };
+        });
       }}
       variant="outline"
     >
