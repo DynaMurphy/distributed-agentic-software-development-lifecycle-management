@@ -2,7 +2,9 @@
 
 import { formatDistance } from "date-fns";
 import { useCallback, useEffect, useState } from "react";
+import useSWR, { useSWRConfig } from "swr";
 import { toast } from "sonner";
+import { ListIcon, PlusIcon } from "lucide-react";
 import { Artifact } from "@/components/create-artifact";
 import { DocumentSkeleton } from "@/components/document-skeleton";
 import {
@@ -16,6 +18,8 @@ import {
 import { LinkedDocumentsBadge } from "@/components/linked-items";
 import { AIInsightsPanel } from "@/components/ai-insights-panel";
 import { TaskList, TaskCompletionSummary } from "@/components/task-list";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -24,6 +28,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MilkdownFieldEditor } from "@/components/milkdown-field-editor";
+import { useArtifact } from "@/hooks/use-artifact";
+import { useSelectedRepository } from "@/hooks/use-selected-repository";
+import { fetcher, generateUUID } from "@/lib/utils";
 
 /**
  * Parsed feature data from the artifact JSON content.
@@ -70,6 +77,25 @@ type FeatureArtifactMetadata = {
   isRestoring: boolean;
   /** Toggle between WYSIWYG (Milkdown) and raw markdown */
   editorMode: "wysiwyg" | "markdown";
+};
+
+interface FeatureSummary {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  feature_type: string;
+}
+
+const statusDotColors: Record<string, string> = {
+  draft: "bg-gray-400",
+  triage: "bg-yellow-500",
+  backlog: "bg-blue-500",
+  spec_generation: "bg-purple-500",
+  implementation: "bg-orange-500",
+  testing: "bg-cyan-500",
+  done: "bg-green-500",
+  rejected: "bg-red-500",
 };
 
 const statusColors: Record<string, string> = {
@@ -415,6 +441,256 @@ function FeatureDetailView({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Browser filter options
+// ---------------------------------------------------------------------------
+
+const browserStatusFilters = [
+  { value: "all", label: "All" },
+  { value: "draft", label: "Draft" },
+  { value: "triage", label: "Triage" },
+  { value: "backlog", label: "Backlog" },
+  { value: "implementation", label: "Implementation" },
+  { value: "testing", label: "Testing" },
+  { value: "done", label: "Done" },
+];
+
+// ---------------------------------------------------------------------------
+// Browser view — shows all features as a list
+// ---------------------------------------------------------------------------
+
+function FeaturesBrowserView({
+  setMetadata,
+}: {
+  setMetadata: React.Dispatch<React.SetStateAction<FeatureArtifactMetadata>>;
+}) {
+  const { setArtifact } = useArtifact();
+  const { selectedRepositoryId } = useSelectedRepository();
+  const { mutate } = useSWRConfig();
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [isCreating, setIsCreating] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const repoParam = selectedRepositoryId
+    ? `?repositoryId=${selectedRepositoryId}`
+    : "";
+  const { data: features, isLoading } = useSWR<FeatureSummary[]>(
+    `/api/features${repoParam}`,
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+
+  const filtered =
+    features?.filter(
+      (f) => statusFilter === "all" || f.status === statusFilter,
+    ) ?? [];
+
+  const handleOpen = (feature: FeatureSummary) => {
+    setMetadata((prev) => ({
+      ...prev,
+      featureId: feature.id,
+    }));
+    setArtifact((current) => ({
+      ...current,
+      documentId: feature.id,
+      title: feature.title,
+      content: "",
+    }));
+  };
+
+  const handleCreate = async () => {
+    const title = newTitle.trim();
+    if (!title) return;
+
+    setIsSubmitting(true);
+    try {
+      const id = generateUUID();
+      const body: Record<string, string> = {
+        id,
+        title,
+        status: "draft",
+        priority: "medium",
+      };
+      if (selectedRepositoryId) {
+        body.repositoryId = selectedRepositoryId;
+      }
+
+      const res = await fetch("/api/features", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) throw new Error("Failed to create feature");
+
+      toast.success("Feature created!");
+      setNewTitle("");
+      setIsCreating(false);
+
+      // Refresh the list
+      mutate(`/api/features${repoParam}`);
+
+      // Open the newly created feature
+      handleOpen({ id, title, status: "draft", priority: "medium", feature_type: "feature" });
+    } catch (error) {
+      console.error("Create feature error:", error);
+      toast.error("Failed to create feature.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (isLoading) {
+    return <DocumentSkeleton artifactKind="text" />;
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b px-6 py-4">
+        <div className="flex items-center gap-3">
+          <ListIcon className="size-5" />
+          <div>
+            <h2 className="text-lg font-semibold">Features</h2>
+            <p className="text-xs text-muted-foreground">
+              Browse and manage product features
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">{features?.length ?? 0} features</Badge>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setIsCreating(true)}
+          >
+            <PlusIcon className="mr-1.5 size-3.5" />
+            Create
+          </Button>
+        </div>
+      </div>
+
+      {/* Inline create form */}
+      {isCreating && (
+        <div className="flex items-center gap-2 border-b px-6 py-3 bg-muted/30">
+          <input
+            autoFocus
+            className="flex-1 rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary/30"
+            placeholder="Feature title…"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleCreate();
+              if (e.key === "Escape") {
+                setIsCreating(false);
+                setNewTitle("");
+              }
+            }}
+          />
+          <Button
+            size="sm"
+            disabled={!newTitle.trim() || isSubmitting}
+            onClick={handleCreate}
+          >
+            {isSubmitting ? "Creating…" : "Add"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setIsCreating(false);
+              setNewTitle("");
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
+
+      {/* Status filter bar */}
+      <div className="flex items-center gap-1 border-b px-6 py-2 overflow-x-auto">
+        {browserStatusFilters.map((f) => (
+          <button
+            key={f.value}
+            type="button"
+            onClick={() => setStatusFilter(f.value)}
+            className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              statusFilter === f.value
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted/50 text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Feature list */}
+      <div className="flex-1 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-muted-foreground">
+            <div className="text-center">
+              <ListIcon className="mx-auto mb-3 size-12 opacity-30" />
+              <p>No features found</p>
+            </div>
+          </div>
+        ) : (
+          <div className="divide-y">
+            {filtered.map((feature) => (
+              <button
+                key={feature.id}
+                type="button"
+                onClick={() => handleOpen(feature)}
+                className="flex w-full items-center gap-3 px-6 py-3 text-left transition-colors hover:bg-accent"
+              >
+                {/* Status dot */}
+                <span
+                  className={`inline-block size-2.5 shrink-0 rounded-full ${
+                    statusDotColors[feature.status] ?? "bg-gray-400"
+                  }`}
+                />
+
+                {/* Title */}
+                <span className="flex-1 truncate text-sm font-medium">
+                  {feature.title}
+                </span>
+
+                {/* Feature type */}
+                {feature.feature_type === "sub_feature" && (
+                  <Badge variant="outline" className="text-xs shrink-0">
+                    sub
+                  </Badge>
+                )}
+
+                {/* Priority */}
+                <span
+                  className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+                    priorityColors[feature.priority] ??
+                    "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {feature.priority}
+                </span>
+
+                {/* Status label */}
+                <span
+                  className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                    statusColors[feature.status] ??
+                    "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {feature.status.replace(/_/g, " ")}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export const featureArtifact = new Artifact<"feature", FeatureArtifactMetadata>(
   {
     kind: "feature",
@@ -422,6 +698,20 @@ export const featureArtifact = new Artifact<"feature", FeatureArtifactMetadata>(
       "Feature management artifact — view and edit features with structured fields, sub-features, and AI insights.",
 
     initialize: async ({ documentId, setMetadata, setArtifact }) => {
+      // Browser mode — no feature to fetch
+      if (documentId === "features-browser") {
+        setMetadata({
+          featureId: null,
+          isDirty: false,
+          isSaving: false,
+          versions: [],
+          currentVersionIndex: 0,
+          isRestoring: false,
+          editorMode: "wysiwyg",
+        });
+        return;
+      }
+
       // Fetch versions in parallel with the current feature data
       let versions: FeatureVersionSummary[] = [];
       try {
@@ -493,7 +783,16 @@ export const featureArtifact = new Artifact<"feature", FeatureArtifactMetadata>(
       setMetadata,
     }) => {
       if (isLoading || !content) {
+        // In browser mode, no content is expected
+        if (!metadata?.featureId) {
+          return <FeaturesBrowserView setMetadata={setMetadata} />;
+        }
         return <DocumentSkeleton artifactKind="text" />;
+      }
+
+      // Browser mode
+      if (!metadata?.featureId) {
+        return <FeaturesBrowserView setMetadata={setMetadata} />;
       }
 
       // Safety: reject absurdly large content to prevent UI freeze
@@ -725,6 +1024,7 @@ export const featureArtifact = new Artifact<"feature", FeatureArtifactMetadata>(
             editorMode: current === "wysiwyg" ? "markdown" : "wysiwyg",
           });
         },
+        isDisabled: ({ metadata }) => !metadata?.featureId,
       },
       {
         icon: <SaveIcon size={18} />,
@@ -806,6 +1106,7 @@ export const featureArtifact = new Artifact<"feature", FeatureArtifactMetadata>(
           }
         },
         isDisabled: ({ metadata }) => {
+          if (!metadata?.featureId) return true;
           if (metadata?.isSaving) return true;
           // Disable save when viewing an old version
           const versions = metadata?.versions ?? [];
@@ -829,6 +1130,7 @@ export const featureArtifact = new Artifact<"feature", FeatureArtifactMetadata>(
             toast.success("Copied to clipboard!");
           }
         },
+        isDisabled: ({ metadata }) => !metadata?.featureId,
       },
     ],
 
