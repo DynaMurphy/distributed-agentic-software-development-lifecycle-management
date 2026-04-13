@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { formatDistance } from "date-fns";
 import { toast } from "sonner";
+import useSWR, { useSWRConfig } from "swr";
 import { Artifact } from "@/components/create-artifact";
 import { DocumentSkeleton } from "@/components/document-skeleton";
 import {
@@ -22,6 +24,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MilkdownFieldEditor } from "@/components/milkdown-field-editor";
+import { useArtifact } from "@/hooks/use-artifact";
+import { useSelectedRepository } from "@/hooks/use-selected-repository";
+import { fetcher, generateUUID } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 interface BugData {
   id: string;
@@ -560,12 +567,222 @@ function BugDetailView({
   );
 }
 
+interface BugSummary {
+  id: string;
+  title: string;
+  status: string;
+  severity: string;
+  priority: string;
+}
+
+const statusDotColors: Record<string, string> = {
+  draft: "bg-gray-400",
+  triage: "bg-yellow-500",
+  backlog: "bg-blue-500",
+  spec_generation: "bg-purple-500",
+  implementation: "bg-orange-500",
+  testing: "bg-cyan-500",
+  done: "bg-green-500",
+  rejected: "bg-red-500",
+};
+
+const severityFilterOptions = [
+  "All",
+  "Blocker",
+  "Critical",
+  "Major",
+  "Minor",
+  "Trivial",
+] as const;
+
+function BugsBrowserView({
+  setMetadata,
+}: {
+  setMetadata: (updater: any) => void;
+}) {
+  const { setArtifact } = useArtifact();
+  const { selectedRepositoryId } = useSelectedRepository();
+  const { mutate } = useSWRConfig();
+
+  const apiUrl = selectedRepositoryId
+    ? `/api/bugs?repositoryId=${selectedRepositoryId}`
+    : "/api/bugs";
+
+  const { data: bugs, isLoading } = useSWR<BugSummary[]>(apiUrl, fetcher);
+
+  const [severityFilter, setSeverityFilter] = useState<string>("All");
+  const [isCreating, setIsCreating] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+
+  if (isLoading) {
+    return <DocumentSkeleton artifactKind="text" />;
+  }
+
+  const filteredBugs =
+    severityFilter === "All"
+      ? bugs ?? []
+      : (bugs ?? []).filter(
+          (b) => b.severity?.toLowerCase() === severityFilter.toLowerCase(),
+        );
+
+  const handleSelectBug = (bug: BugSummary) => {
+    setMetadata((prev: any) => ({ ...prev, bugId: bug.id }));
+    setArtifact((current: any) => ({
+      ...current,
+      documentId: bug.id,
+      title: bug.title,
+      content: "",
+    }));
+  };
+
+  const handleCreateBug = async () => {
+    const title = newTitle.trim();
+    if (!title) return;
+
+    const id = generateUUID();
+    try {
+      const body: Record<string, string> = {
+        id,
+        title,
+        status: "draft",
+        priority: "medium",
+        severity: "major",
+      };
+      if (selectedRepositoryId) {
+        body.repositoryId = selectedRepositoryId;
+      }
+
+      const res = await fetch("/api/bugs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Failed to create bug");
+
+      toast.success("Bug created!");
+      setNewTitle("");
+      setIsCreating(false);
+      mutate(apiUrl);
+    } catch {
+      toast.error("Failed to create bug.");
+    }
+  };
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b px-6 py-4">
+        <div className="flex items-center gap-3">
+          <span className="text-xl">🐛</span>
+          <div>
+            <h2 className="text-lg font-semibold">Bugs</h2>
+            <p className="text-xs text-muted-foreground">
+              Track and manage bug reports
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">{bugs?.length ?? 0} bugs</Badge>
+          <Button size="sm" variant="outline" onClick={() => setIsCreating(!isCreating)}>
+            {isCreating ? "Cancel" : "Report Bug"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Inline create form */}
+      {isCreating && (
+        <div className="flex items-center gap-2 border-b px-6 py-3 bg-muted/30">
+          <input
+            className="flex-1 px-3 py-1.5 text-sm rounded-md border bg-background outline-none focus:ring-1 focus:ring-primary/20"
+            placeholder="Bug title..."
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleCreateBug();
+            }}
+            autoFocus
+          />
+          <Button size="sm" onClick={handleCreateBug} disabled={!newTitle.trim()}>
+            Create
+          </Button>
+        </div>
+      )}
+
+      {/* Severity filter */}
+      <div className="flex items-center gap-1.5 border-b px-6 py-2 overflow-x-auto">
+        {severityFilterOptions.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => setSeverityFilter(opt)}
+            className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+              severityFilter === opt
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+
+      {/* Bug list */}
+      <div className="flex-1 overflow-y-auto">
+        {filteredBugs.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-muted-foreground">
+            <div className="text-center">
+              <span className="block text-4xl mb-3 opacity-30">🐛</span>
+              <p>No bugs found</p>
+            </div>
+          </div>
+        ) : (
+          <div className="divide-y">
+            {filteredBugs.map((bug) => (
+              <button
+                key={bug.id}
+                type="button"
+                onClick={() => handleSelectBug(bug)}
+                className="flex w-full items-center gap-3 px-6 py-3 text-left transition-colors hover:bg-accent"
+              >
+                <span
+                  className={`shrink-0 size-2.5 rounded-full ${statusDotColors[bug.status] ?? "bg-gray-400"}`}
+                />
+                <span className="flex-1 min-w-0 truncate text-sm font-medium">
+                  {bug.title}
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {bug.severity && <SeverityBadge severity={bug.severity} />}
+                  {bug.priority && <PriorityBadge priority={bug.priority} />}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export const bugArtifact = new Artifact<"bug", BugArtifactMetadata>({
   kind: "bug",
   description:
     "Bug management artifact — view and edit bug reports with severity, reproduction steps, and AI triage.",
 
   initialize: async ({ documentId, setMetadata, setArtifact }) => {
+    // Browser mode — no bug to fetch
+    if (documentId === "bugs-browser") {
+      setMetadata({
+        bugId: null,
+        isDirty: false,
+        isSaving: false,
+        versions: [],
+        currentVersionIndex: 0,
+        isRestoring: false,
+        editorMode: "wysiwyg",
+      });
+      return;
+    }
+
     // Fetch versions in parallel with the current bug data
     let versions: BugVersionSummary[] = [];
     try {
@@ -636,6 +853,11 @@ export const bugArtifact = new Artifact<"bug", BugArtifactMetadata>({
     metadata,
     setMetadata,
   }) => {
+    // Browser mode
+    if (!metadata?.bugId) {
+      return <BugsBrowserView setMetadata={setMetadata} />;
+    }
+
     if (isLoading || !content) {
       return <DocumentSkeleton artifactKind="text" />;
     }
@@ -852,6 +1074,7 @@ export const bugArtifact = new Artifact<"bug", BugArtifactMetadata>({
     {
       icon: <CodeIcon size={18} />,
       description: "Toggle raw markdown editor",
+      isDisabled: ({ metadata }) => !metadata?.bugId,
       onClick: ({ metadata, setMetadata }) => {
         const current = metadata?.editorMode ?? "wysiwyg";
         setMetadata({
@@ -943,6 +1166,7 @@ export const bugArtifact = new Artifact<"bug", BugArtifactMetadata>({
         }
       },
       isDisabled: ({ metadata }) => {
+        if (!metadata?.bugId) return true;
         if (metadata?.isSaving) return true;
         // Disable save when viewing an old version
         const versions = metadata?.versions ?? [];
@@ -955,6 +1179,7 @@ export const bugArtifact = new Artifact<"bug", BugArtifactMetadata>({
     {
       icon: <CopyIcon size={18} />,
       description: "Copy bug details",
+      isDisabled: ({ metadata }) => !metadata?.bugId,
       onClick: ({ content }) => {
         try {
           const b = JSON.parse(content);
