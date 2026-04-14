@@ -93,30 +93,6 @@ export function SidebarSPLM() {
         </SidebarGroupLabel>
       </SidebarGroup>
 
-      {/* Roadmap */}
-      <SidebarGroup>
-        <SidebarGroupLabel
-          className="cursor-pointer select-none"
-          onClick={() => {
-            setArtifact((current) => ({
-              ...current,
-              documentId: "roadmap-view",
-              kind: "roadmap" as const,
-              title: "Product Roadmap",
-              content: "",
-              isVisible: true,
-              status: "idle",
-              boundingBox: { top: 0, left: 0, width: 0, height: 0 },
-            }));
-            setOpenMobile(false);
-          }}
-        >
-          <span className="flex items-center gap-1.5">
-            <span>🗺️</span>
-            <span>Roadmap</span>
-          </span>
-        </SidebarGroupLabel>
-      </SidebarGroup>
     </>
   );
 }
