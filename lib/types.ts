@@ -124,6 +124,8 @@ export type CustomUIDataTypes = {
   bugDelta: string;
   taskDelta: string;
   backlogDelta: string;
+  capabilityDelta: string;
+  roadmapDelta: string;
   suggestion: Suggestion;
   appendMessage: string;
   id: string;

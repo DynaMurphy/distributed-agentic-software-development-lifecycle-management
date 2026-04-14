@@ -1,14 +1,15 @@
 /**
- * Milkdown plugin that renders live mermaid diagram previews below
- * code blocks with language "mermaid".
+ * Milkdown mermaid rendering via Crepe's CodeMirror renderPreview config.
  *
- * Uses ProseMirror widget decorations so the CodeMirror code-block
- * nodeView remains fully functional for editing.
+ * Instead of a ProseMirror plugin that scans the DOM (which caused freezes),
+ * this uses the native `renderPreview` callback in the CodeBlockConfig.
+ * When a code block's language is "mermaid", the callback renders the
+ * diagram SVG into the preview area managed by the code-block component.
+ *
+ * Performance optimisations:
+ *   1. svgCache — reuses rendered SVG when diagram code hasn't changed.
+ *   2. prefetchMermaid — lets callers warm the ~2 MB mermaid bundle early.
  */
-import type { Editor } from "@milkdown/kit/core";
-import { $prose } from "@milkdown/kit/utils";
-import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
-import { DecorationSet, Decoration } from "@milkdown/kit/prose/view";
 
 let mermaidModule: typeof import("mermaid") | null = null;
 let mermaidIdCounter = 0;
@@ -19,100 +20,85 @@ async function getMermaid() {
     mermaidModule.default.initialize({
       startOnLoad: false,
       theme: "default",
-      securityLevel: "strict",
+      securityLevel: "loose",
+      suppressErrorRendering: true,
+      // Use SVG <text> instead of <foreignObject> HTML for labels.
+      // This avoids Milkdown's aggressive CSS reset (.milkdown *)
+      // stripping margin/padding/font-size from foreignObject content.
+      htmlLabels: false,
+      flowchart: { htmlLabels: false },
     });
   }
   return mermaidModule.default;
 }
 
-const mermaidPluginKey = new PluginKey("milkdown-mermaid");
+/**
+ * Warm the mermaid bundle without rendering anything.
+ * Call this on hover over any UI element that might open a spec document.
+ */
+export function prefetchMermaid(): void {
+  getMermaid();
+}
+
+/** code string → rendered SVG string. Persists across decoration rebuilds. */
+const svgCache = new Map<string, string>();
 
 /**
- * Render a mermaid diagram into a container element.
- * Returns the container so it can be used as a widget decoration.
+ * Render mermaid code to SVG string. Uses the shared svgCache.
+ * Safe to call from any component.
  */
-async function renderMermaidWidget(
-  code: string,
-  container: HTMLElement,
-): Promise<void> {
-  if (!code.trim()) {
-    container.innerHTML =
-      '<p class="mermaid-empty">Empty mermaid diagram</p>';
-    return;
-  }
+export async function renderMermaidToSvg(code: string): Promise<string> {
+  if (!code.trim()) return "";
+  const cached = svgCache.get(code);
+  if (cached) return cached;
   try {
     const mermaid = await getMermaid();
     const id = `mermaid-${++mermaidIdCounter}`;
     const { svg } = await mermaid.render(id, code);
-    container.innerHTML = svg;
+    svgCache.set(code, svg);
+    return svg;
   } catch {
-    container.innerHTML =
-      '<pre class="mermaid-error">Invalid mermaid syntax</pre>';
+    return '<pre class="mermaid-error">Invalid mermaid syntax</pre>';
   }
 }
 
-/** Track rendered widgets so we avoid redundant re-renders. */
-const widgetCache = new WeakMap<HTMLElement, string>();
-
-const mermaidProsePlugin = $prose(() => {
-  return new Plugin({
-    key: mermaidPluginKey,
-    state: {
-      init(_, state) {
-        return buildDecorations(state);
-      },
-      apply(tr, old, _oldState, newState) {
-        // Only rebuild decorations when doc changes
-        if (tr.docChanged) {
-          return buildDecorations(newState);
-        }
-        return old.map(tr.mapping, tr.doc);
-      },
-    },
-    props: {
-      decorations(state) {
-        return mermaidPluginKey.getState(state);
-      },
-    },
-  });
-});
-
-function buildDecorations(
-  state: import("@milkdown/kit/prose/state").EditorState,
-): DecorationSet {
-  const decorations: Decoration[] = [];
-
-  state.doc.descendants((node, pos) => {
-    if (node.type.name === "code_block" && node.attrs.language === "mermaid") {
-      const endPos = pos + node.nodeSize;
-      const code = node.textContent;
-
-      const widget = Decoration.widget(endPos, () => {
-        const container = document.createElement("div");
-        container.className = "mermaid-preview";
-        container.setAttribute("contenteditable", "false");
-
-        // Render asynchronously
-        renderMermaidWidget(code, container);
-        widgetCache.set(container, code);
-
-        return container;
-      }, {
-        side: 1, // appear after the node
-        key: `mermaid-${pos}`,
-      });
-
-      decorations.push(widget);
-    }
-  });
-
-  return DecorationSet.create(state.doc, decorations);
-}
-
 /**
- * Mermaid feature for Crepe's `addFeature()`.
- * Renders live previews below ```mermaid code blocks.
+ * renderPreview callback for Crepe's CodeMirror featureConfig.
+ * Handles "mermaid" language code blocks; returns null for all others
+ * so the default behaviour applies.
+ *
+ * Usage in milkdown-editor.tsx featureConfigs:
+ *   [Crepe.Feature.CodeMirror]: {
+ *     renderPreview: mermaidRenderPreview,
+ *     previewOnlyByDefault: false,
+ *   }
  */
-export const mermaidFeature = (editor: Editor) => {
-  editor.use(mermaidProsePlugin);
-};
+export function mermaidRenderPreview(
+  language: string,
+  content: string,
+  applyPreview: (value: null | string | HTMLElement) => void,
+): void | null | string | HTMLElement {
+  if (language !== "mermaid") return null;
+
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+
+  // Return cached SVG immediately if available
+  const cached = svgCache.get(trimmed);
+  if (cached) {
+    const el = document.createElement("div");
+    el.className = "mermaid-preview";
+    el.innerHTML = cached;
+    return el;
+  }
+
+  // Async render — return nothing now, apply when ready
+  renderMermaidToSvg(trimmed).then((svg) => {
+    const el = document.createElement("div");
+    el.className = "mermaid-preview";
+    el.innerHTML = svg;
+    applyPreview(el);
+  });
+
+  return undefined;
+}

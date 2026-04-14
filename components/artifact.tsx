@@ -18,6 +18,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { backlogArtifact } from "@/artifacts/backlog/client";
 import { bugArtifact } from "@/artifacts/bug/client";
 import { codeArtifact } from "@/artifacts/code/client";
+import { documentArtifact } from "@/artifacts/document/client";
 import { featureArtifact } from "@/artifacts/feature/client";
 import { imageArtifact } from "@/artifacts/image/client";
 import { sheetArtifact } from "@/artifacts/sheet/client";
@@ -26,6 +27,8 @@ import { specArtifact } from "@/artifacts/spec/client";
 import { repositoryArtifact } from "@/artifacts/repository/client";
 import { templateArtifact } from "@/artifacts/template/client";
 import { textArtifact } from "@/artifacts/text/client";
+import { capabilityArtifact } from "@/artifacts/capability/client";
+import { roadmapArtifact } from "@/artifacts/roadmap/client";
 import { useArtifact } from "@/hooks/use-artifact";
 import type { Document, Vote } from "@/lib/db/schema";
 import type { Attachment, ChatMessage } from "@/lib/types";
@@ -70,6 +73,9 @@ export const artifactDefinitions = [
   skillArtifact,
   templateArtifact,
   repositoryArtifact,
+  documentArtifact,
+  capabilityArtifact,
+  roadmapArtifact,
 ];
 export type ArtifactKind = (typeof artifactDefinitions)[number]["kind"];
 
@@ -125,7 +131,7 @@ function PureArtifact({
 }) {
   const { artifact, setArtifact, metadata, setMetadata } = useArtifact();
 
-  const splmKinds = ["feature", "bug", "backlog", "skill", "template", "repository"];
+  const splmKinds = ["feature", "bug", "backlog", "skill", "template", "repository", "capability"];
   const isSplmArtifact = splmKinds.includes(artifact.kind);
 
   // Guard against invalid / placeholder document IDs ("init", literal "undefined")
@@ -142,7 +148,9 @@ function PureArtifact({
     hasValidDocumentId && artifact.status !== "streaming" && !isSplmArtifact
       ? artifact.kind === "spec"
         ? `/api/spec-document?id=${artifact.documentId}`
-        : `/api/document?id=${artifact.documentId}`
+        : artifact.kind === "document"
+          ? null
+          : `/api/document?id=${artifact.documentId}`
       : null,
     fetcher,
     {

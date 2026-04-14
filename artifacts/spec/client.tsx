@@ -19,7 +19,8 @@ import {
 import { Editor } from "@/components/text-editor";
 import type { EditorMode } from "@/components/text-editor";
 import { LinkedItemsBadge } from "@/components/linked-items";
-import { useLiveSpecContent } from "@/hooks/use-artifact";
+import { SpecViewer } from "@/components/spec-viewer";
+import { useArtifact, useLiveSpecContent } from "@/hooks/use-artifact";
 
 /**
  * Metadata for the spec artifact — tracks dirty state and the bitemporal document ID.
@@ -31,8 +32,8 @@ type SpecArtifactMetadata = {
   bitemporalDocId: string | null;
   /** Whether a save operation is in progress */
   isSaving: boolean;
-  /** Current editor mode: WYSIWYG (milkdown) or raw markdown */
-  editorMode: EditorMode;
+  /** Current editor mode: view (read-only), WYSIWYG (milkdown) or raw markdown */
+  editorMode: EditorMode | "view";
 };
 
 /**
@@ -56,8 +57,25 @@ function SpecContentInner({
   metadata: SpecArtifactMetadata;
   setMetadata: React.Dispatch<React.SetStateAction<SpecArtifactMetadata>>;
 }) {
-  const editorMode = metadata?.editorMode ?? "wysiwyg";
+  const editorMode = metadata?.editorMode ?? "view";
   const { setLiveSpecContent } = useLiveSpecContent();
+  const { setArtifact } = useArtifact();
+
+  const handleNavigateDocument = useCallback(
+    (docId: string, linkText: string) => {
+      setArtifact((current) => ({
+        ...current,
+        documentId: docId,
+        kind: "spec" as const,
+        title: linkText,
+        content: "",
+        isVisible: true,
+        status: "idle",
+        boundingBox: { top: 0, left: 0, width: 0, height: 0 },
+      }));
+    },
+    [setArtifact],
+  );
 
   /**
    * Handle content changes from the Milkdown editor.
@@ -72,6 +90,18 @@ function SpecContentInner({
     [onSaveContent, setMetadata, setLiveSpecContent]
   );
 
+  // View mode: read-only Streamdown + mermaid rendering
+  if (editorMode === "view") {
+    return (
+      <div className="flex flex-col w-full h-full min-h-[600px]">
+        {metadata?.bitemporalDocId && (
+          <LinkedItemsBadge documentId={metadata.bitemporalDocId} />
+        )}
+        <SpecViewer content={content} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col w-full h-full min-h-[600px]">
       {metadata?.bitemporalDocId && (
@@ -83,7 +113,8 @@ function SpecContentInner({
         isCurrentVersion={isCurrentVersion}
         onSaveContent={handleSaveContent}
         status={status}
-        editorMode={editorMode}
+        editorMode={editorMode as EditorMode}
+        onNavigateDocument={handleNavigateDocument}
       />
     </div>
   );
@@ -102,7 +133,7 @@ export const specArtifact = new Artifact<"spec", SpecArtifactMetadata>({
       isDirty: false,
       bitemporalDocId: documentId,
       isSaving: false,
-      editorMode: "wysiwyg",
+      editorMode: "view",
     });
   },
 
@@ -166,15 +197,16 @@ export const specArtifact = new Artifact<"spec", SpecArtifactMetadata>({
   },
 
   actions: [
-    // Toggle between WYSIWYG and raw markdown editor
+    // Toggle between view, WYSIWYG, and raw markdown
     {
-      icon: <CodeIcon size={18} />,
-      description: "Toggle raw markdown editor",
+      icon: <EyeIcon size={18} />,
+      description: "Toggle view / edit mode",
       onClick: ({ metadata, setMetadata }) => {
-        const current = metadata?.editorMode ?? "wysiwyg";
+        const current = metadata?.editorMode ?? "view";
+        const next = current === "view" ? "wysiwyg" : current === "wysiwyg" ? "markdown" : "view";
         setMetadata({
           ...metadata,
-          editorMode: current === "wysiwyg" ? "markdown" : "wysiwyg",
+          editorMode: next,
         });
       },
     },

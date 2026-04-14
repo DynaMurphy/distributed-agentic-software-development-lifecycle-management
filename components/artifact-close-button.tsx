@@ -14,6 +14,20 @@ const BROWSER_PARENT_KINDS: Record<
   },
 };
 
+/**
+ * Kinds where detail views should navigate back to their own browser
+ * (i.e. the browser and detail share the same artifact kind).
+ */
+const SELF_BROWSER_KINDS: Record<
+  string,
+  { documentId: string; title: string }
+> = {
+  capability: {
+    documentId: "capabilities-browser",
+    title: "Capabilities",
+  },
+};
+
 function PureArtifactCloseButton() {
   const { setArtifact } = useArtifact();
 
@@ -34,6 +48,22 @@ function PureArtifactCloseButton() {
               documentId: parentBrowser.documentId,
               kind: parentBrowser.kind as any,
               title: parentBrowser.title,
+              content: "",
+              status: "idle",
+            };
+          }
+
+          // For kinds that use the same kind for browser + detail,
+          // navigate back to the browser when viewing a detail.
+          const selfBrowser = SELF_BROWSER_KINDS[currentArtifact.kind];
+          if (
+            selfBrowser &&
+            currentArtifact.documentId !== selfBrowser.documentId
+          ) {
+            return {
+              ...currentArtifact,
+              documentId: selfBrowser.documentId,
+              title: selfBrowser.title,
               content: "",
               status: "idle",
             };

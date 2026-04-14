@@ -340,7 +340,7 @@ export async function saveDocument({
       .values({
         id,
         title,
-        kind,
+        kind: kind as (typeof document.$inferInsert)["kind"],
         content,
         userId,
         createdAt: new Date(),

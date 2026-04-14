@@ -53,6 +53,8 @@ export type TaskStatus = "todo" | "in_progress" | "done" | "blocked";
 export type ItemType = "feature" | "bug" | "task";
 export type LinkType = "specification" | "test_plan" | "design" | "reference";
 export type RepositoryStatus = "active" | "archived";
+export type CapabilityStatus = "active" | "archived";
+export type SdlcPhase = "strategy_planning" | "prioritization" | "specification" | "implementation" | "verification" | "delivery" | "post_delivery" | "platform";
 
 export const DEFAULT_REPOSITORY_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -505,7 +507,7 @@ export async function updateBacklogItem(params: {
 
 export async function listDocuments() {
   const result = await query(
-    `SELECT DISTINCT ON (id) id, version_id, title, valid_from FROM current_documents ORDER BY id, valid_from DESC`
+    `SELECT DISTINCT ON (id) id, version_id, title, valid_from, parent_id, sort_order FROM current_documents ORDER BY id, valid_from DESC`
   );
   return result.rows;
 }
@@ -523,10 +525,12 @@ export async function createDocument(params: {
   title: string;
   content: string;
   maintainedBy?: string;
+  parentId?: string | null;
+  sortOrder?: number;
 }): Promise<string> {
   const result = await query(
-    `SELECT insert_document_version($1::uuid, $2::varchar, $3::text, $4::timestamptz, $5::uuid) AS version_id`,
-    [params.id, params.title, params.content, new Date().toISOString(), params.maintainedBy ?? null]
+    `SELECT insert_document_version($1::uuid, $2::varchar, $3::text, $4::timestamptz, $5::uuid, $6::uuid, $7::integer) AS version_id`,
+    [params.id, params.title, params.content, new Date().toISOString(), params.maintainedBy ?? null, params.parentId ?? null, params.sortOrder ?? 0]
   );
   return result.rows[0].version_id as string;
 }
@@ -577,4 +581,131 @@ export async function getWorkflowStatus() {
     tasks: tasks.rows,
     backlog: backlog.rows,
   };
+}
+
+// =============================================================================
+// CAPABILITY HELPERS
+// =============================================================================
+
+export async function createCapability(params: {
+  id: string;
+  name: string;
+  description?: string;
+  sdlcPhase?: SdlcPhase;
+  sortOrder?: number;
+  status?: CapabilityStatus;
+  maintainedBy?: string;
+}): Promise<string> {
+  const result = await query(
+    `SELECT insert_capability_version($1::uuid, $2::varchar, $3::text, $4::varchar, $5::int, $6::varchar, $7::timestamptz, $8::uuid) AS version_id`,
+    [
+      params.id,
+      params.name,
+      params.description ?? null,
+      params.sdlcPhase ?? 'platform',
+      params.sortOrder ?? 0,
+      params.status ?? 'active',
+      new Date().toISOString(),
+      params.maintainedBy ?? null,
+    ]
+  );
+  return result.rows[0].version_id as string;
+}
+
+export async function updateCapability(params: {
+  id: string;
+  name?: string;
+  description?: string;
+  sdlcPhase?: SdlcPhase;
+  sortOrder?: number;
+  status?: CapabilityStatus;
+  maintainedBy?: string;
+}): Promise<string> {
+  const result = await query(
+    `SELECT update_capability_version($1::uuid, $2::varchar, $3::text, $4::varchar, $5::int, $6::varchar, $7::timestamptz, $8::uuid) AS version_id`,
+    [
+      params.id,
+      params.name ?? null,
+      params.description ?? null,
+      params.sdlcPhase ?? null,
+      params.sortOrder ?? null,
+      params.status ?? null,
+      new Date().toISOString(),
+      params.maintainedBy ?? null,
+    ]
+  );
+  return result.rows[0].version_id as string;
+}
+
+export async function getCapabilityById(id: string) {
+  const result = await query(
+    `SELECT DISTINCT ON (id) id, version_id, name, description, sdlc_phase, sort_order, status, maintained_by, valid_from, valid_to
+     FROM current_capabilities WHERE id = $1 AND valid_to = 'infinity'
+     ORDER BY id, valid_from DESC`,
+    [id]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function listCapabilities(filters?: { status?: string; sdlcPhase?: string }) {
+  let sql = `SELECT DISTINCT ON (id) id, version_id, name, description, sdlc_phase, sort_order, status, valid_from
+             FROM current_capabilities WHERE valid_to = 'infinity'`;
+  const params: any[] = [];
+  if (filters?.status) { params.push(filters.status); sql += ` AND status = $${params.length}`; }
+  if (filters?.sdlcPhase) { params.push(filters.sdlcPhase); sql += ` AND sdlc_phase = $${params.length}`; }
+  sql += ' ORDER BY id, valid_from DESC';
+  const result = await query(sql, params);
+  // Sort by sort_order in JS (DISTINCT ON requires ORDER BY id first)
+  return result.rows.sort((a: any, b: any) => a.sort_order - b.sort_order);
+}
+
+export async function addItemToCapability(params: {
+  id: string;
+  capabilityId: string;
+  itemType: string;
+  itemId: string;
+  maintainedBy?: string;
+}): Promise<string> {
+  const result = await query(
+    `SELECT insert_capability_item_version($1::uuid, $2::uuid, $3::varchar, $4::uuid, $5::timestamptz, $6::uuid) AS version_id`,
+    [
+      params.id,
+      params.capabilityId,
+      params.itemType,
+      params.itemId,
+      new Date().toISOString(),
+      params.maintainedBy ?? null,
+    ]
+  );
+  return result.rows[0].version_id as string;
+}
+
+export async function removeItemFromCapability(id: string): Promise<void> {
+  await query(
+    `SELECT delete_capability_item($1::uuid, $2::timestamptz)`,
+    [id, new Date().toISOString()]
+  );
+}
+
+export async function getCapabilityItems(capabilityId: string) {
+  const result = await query(
+    `SELECT DISTINCT ON (ci.id) ci.id, ci.version_id, ci.capability_id, ci.item_type, ci.item_id, ci.valid_from
+     FROM current_capability_items ci
+     WHERE ci.capability_id = $1 AND ci.valid_to = 'infinity'
+     ORDER BY ci.id, ci.valid_from DESC`,
+    [capabilityId]
+  );
+  return result.rows;
+}
+
+export async function getItemCapabilities(itemType: string, itemId: string) {
+  const result = await query(
+    `SELECT DISTINCT ON (c.id) c.id, c.name, c.sdlc_phase, c.sort_order, ci.id AS link_id
+     FROM current_capability_items ci
+     JOIN current_capabilities c ON ci.capability_id = c.id AND c.valid_to = 'infinity'
+     WHERE ci.item_type = $1 AND ci.item_id = $2 AND ci.valid_to = 'infinity'
+     ORDER BY c.id, c.valid_from DESC`,
+    [itemType, itemId]
+  );
+  return result.rows;
 }

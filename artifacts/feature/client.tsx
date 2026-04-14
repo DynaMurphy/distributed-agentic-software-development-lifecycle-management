@@ -17,6 +17,7 @@ import {
 } from "@/components/icons";
 import { LinkedDocumentsBadge } from "@/components/linked-items";
 import { AIInsightsPanel } from "@/components/ai-insights-panel";
+import { CapabilityPicker, CapabilityFilter } from "@/components/capability-picker";
 import { TaskList, TaskCompletionSummary } from "@/components/task-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -375,6 +376,15 @@ function FeatureDetailView({
         </div>
       )}
 
+      {/* Capabilities */}
+      {feature.id && (
+        <CapabilityPicker
+          itemType="feature"
+          itemId={feature.id}
+          isEditable={isCurrentVersion}
+        />
+      )}
+
       {/* Sub-features */}
       {feature.sub_features && feature.sub_features.length > 0 && (
         <div className="space-y-2">
@@ -468,6 +478,7 @@ function FeaturesBrowserView({
   const { selectedRepositoryId } = useSelectedRepository();
   const { mutate } = useSWRConfig();
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [capabilityFilter, setCapabilityFilter] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -481,10 +492,24 @@ function FeaturesBrowserView({
     { revalidateOnFocus: false },
   );
 
-  const filtered =
-    features?.filter(
-      (f) => statusFilter === "all" || f.status === statusFilter,
-    ) ?? [];
+  // Fetch capability assignments for all features (eagerly, so filter works immediately)
+  const { data: capabilityItemsMap } = useSWR<Record<string, string[]>>(
+    "/api/capabilities/item-map?itemType=feature",
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+
+  const filtered = (features ?? []).filter((f) => {
+    if (statusFilter !== "all" && f.status !== statusFilter) return false;
+    if (capabilityFilter.length > 0 && capabilityItemsMap) {
+      const featureCaps = capabilityItemsMap[f.id] ?? [];
+      if (capabilityFilter.includes("ungrouped") && featureCaps.length === 0) return true;
+      const nonUngrouped = capabilityFilter.filter((id) => id !== "ungrouped");
+      if (nonUngrouped.length > 0 && nonUngrouped.some((id) => featureCaps.includes(id))) return true;
+      return false;
+    }
+    return true;
+  });
 
   const handleOpen = (feature: FeatureSummary) => {
     setMetadata((prev) => ({
@@ -609,7 +634,7 @@ function FeaturesBrowserView({
       )}
 
       {/* Status filter bar */}
-      <div className="flex items-center gap-1 border-b px-6 py-2 overflow-x-auto">
+      <div className="flex items-center gap-1 border-b px-6 py-2 flex-wrap">
         {browserStatusFilters.map((f) => (
           <button
             key={f.value}
@@ -624,6 +649,12 @@ function FeaturesBrowserView({
             {f.label}
           </button>
         ))}
+        <div className="w-px h-4 bg-border mx-1" />
+        <CapabilityFilter
+          selectedIds={capabilityFilter}
+          onChange={setCapabilityFilter}
+          itemType="feature"
+        />
       </div>
 
       {/* Feature list */}

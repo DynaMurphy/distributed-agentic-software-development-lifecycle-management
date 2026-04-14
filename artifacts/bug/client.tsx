@@ -15,6 +15,7 @@ import {
 } from "@/components/icons";
 import { LinkedDocumentsBadge } from "@/components/linked-items";
 import { AIInsightsPanel } from "@/components/ai-insights-panel";
+import { CapabilityPicker, CapabilityFilter } from "@/components/capability-picker";
 import { TaskList, TaskCompletionSummary } from "@/components/task-list";
 import {
   Select,
@@ -532,6 +533,15 @@ function BugDetailView({
         </div>
       )}
 
+      {/* Capabilities */}
+      {bug.id && (
+        <CapabilityPicker
+          itemType="bug"
+          itemId={bug.id}
+          isEditable={isCurrentVersion}
+        />
+      )}
+
       {/* Tasks */}
       {bug.id && (
         <TaskList parentType="bug" parentId={bug.id} />
@@ -611,19 +621,34 @@ function BugsBrowserView({
   const { data: bugs, isLoading } = useSWR<BugSummary[]>(apiUrl, fetcher);
 
   const [severityFilter, setSeverityFilter] = useState<string>("All");
+  const [capabilityFilter, setCapabilityFilter] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
+
+  // Fetch capability assignments for all bugs (eagerly, so filter works immediately)
+  const { data: capabilityItemsMap } = useSWR<Record<string, string[]>>(
+    "/api/capabilities/item-map?itemType=bug",
+    fetcher,
+    { revalidateOnFocus: false },
+  );
 
   if (isLoading) {
     return <DocumentSkeleton artifactKind="text" />;
   }
 
-  const filteredBugs =
-    severityFilter === "All"
-      ? bugs ?? []
-      : (bugs ?? []).filter(
-          (b) => b.severity?.toLowerCase() === severityFilter.toLowerCase(),
-        );
+  const filteredBugs = (bugs ?? []).filter((b) => {
+    if (severityFilter !== "All" && b.severity?.toLowerCase() !== severityFilter.toLowerCase()) {
+      return false;
+    }
+    if (capabilityFilter.length > 0 && capabilityItemsMap) {
+      const bugCaps = capabilityItemsMap[b.id] ?? [];
+      const nonUngrouped = capabilityFilter.filter((id) => id !== "ungrouped");
+      if (capabilityFilter.includes("ungrouped") && bugCaps.length === 0) return true;
+      if (nonUngrouped.length > 0 && nonUngrouped.some((id) => bugCaps.includes(id))) return true;
+      return false;
+    }
+    return true;
+  });
 
   const handleSelectBug = (bug: BugSummary) => {
     setMetadata((prev: any) => ({ ...prev, bugId: bug.id }));
@@ -709,7 +734,7 @@ function BugsBrowserView({
       )}
 
       {/* Severity filter */}
-      <div className="flex items-center gap-1.5 border-b px-6 py-2 overflow-x-auto">
+      <div className="flex items-center gap-1.5 border-b px-6 py-2 flex-wrap">
         {severityFilterOptions.map((opt) => (
           <button
             key={opt}
@@ -724,6 +749,12 @@ function BugsBrowserView({
             {opt}
           </button>
         ))}
+        <div className="w-px h-4 bg-border mx-1" />
+        <CapabilityFilter
+          selectedIds={capabilityFilter}
+          onChange={setCapabilityFilter}
+          itemType="bug"
+        />
       </div>
 
       {/* Bug list */}

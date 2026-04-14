@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BookOpenIcon,
   BrainCircuitIcon,
   BugIcon,
   FileTextIcon,
@@ -174,6 +175,27 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                       >
                         <FileTextIcon />
                         <span>Templates</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        onClick={() => {
+                          setOpenMobile(false);
+                          setArtifact((current) => ({
+                            ...current,
+                            documentId: "documents-browser",
+                            kind: "document" as const,
+                            title: "Documents",
+                            content: "",
+                            isVisible: true,
+                            status: "idle",
+                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
+                          }));
+                        }}
+                        tooltip="Documents"
+                      >
+                        <BookOpenIcon />
+                        <span>Documents</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                     <SidebarMenuItem>

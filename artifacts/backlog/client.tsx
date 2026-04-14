@@ -38,7 +38,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useSWRConfig } from "swr";
+import useSWR from "swr";
 import type { UIArtifact } from "@/components/artifact";
+import { CapabilityFilter } from "@/components/capability-picker";
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 interface BacklogItemData {
   id: string;
@@ -579,16 +583,52 @@ function KanbanColumn({
   items,
   onItemUpdate,
   onOpenDetail,
+  groupByCapability,
+  capabilityMap,
+  capabilities,
 }: {
   column: (typeof KANBAN_COLUMNS)[number];
   items: BacklogItemData[];
   onItemUpdate: (itemId: string, updates: Partial<BacklogItemData>) => void;
   onOpenDetail: (item: BacklogItemData) => void;
+  groupByCapability?: boolean;
+  capabilityMap?: Record<string, string[]>;
+  capabilities?: { id: string; name: string; sdlc_phase: string }[];
 }) {
   const { setNodeRef } = useSortable({
     id: `column-${column.id}`,
     data: { type: "column", columnId: column.id },
   });
+
+  // Group items by capability when grouping is enabled
+  const swimLanes = useMemo(() => {
+    if (!groupByCapability || !capabilityMap || !capabilities) {
+      return null;
+    }
+
+    const lanes: { id: string; label: string; items: BacklogItemData[] }[] = [];
+    const assignedItemIds = new Set<string>();
+
+    for (const cap of capabilities) {
+      const laneItems = items.filter((item) => {
+        const itemKey = `${item.item_type}:${item.item_id}`;
+        const caps = capabilityMap[item.item_id] ?? [];
+        return caps.includes(cap.id);
+      });
+      if (laneItems.length > 0) {
+        lanes.push({ id: cap.id, label: cap.name, items: laneItems });
+        for (const li of laneItems) assignedItemIds.add(li.id);
+      }
+    }
+
+    // Ungrouped items
+    const ungrouped = items.filter((i) => !assignedItemIds.has(i.id));
+    if (ungrouped.length > 0) {
+      lanes.push({ id: "ungrouped", label: "Ungrouped", items: ungrouped });
+    }
+
+    return lanes;
+  }, [groupByCapability, capabilityMap, capabilities, items]);
 
   return (
     <div
@@ -616,9 +656,28 @@ function KanbanColumn({
               Drop items here
             </div>
           )}
-          {items.map((item) => (
-            <SortableCard key={item.id} item={item} onItemUpdate={onItemUpdate} onOpenDetail={onOpenDetail} />
-          ))}
+          {swimLanes ? (
+            swimLanes.map((lane) => (
+              <div key={lane.id} className="mb-2">
+                <div className="flex items-center gap-1.5 px-1 py-1 mb-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+                  <span className="text-[10px] font-medium text-muted-foreground truncate">
+                    {lane.label}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground/60">
+                    {lane.items.length}
+                  </span>
+                </div>
+                {lane.items.map((item) => (
+                  <SortableCard key={item.id} item={item} onItemUpdate={onItemUpdate} onOpenDetail={onOpenDetail} />
+                ))}
+              </div>
+            ))
+          ) : (
+            items.map((item) => (
+              <SortableCard key={item.id} item={item} onItemUpdate={onItemUpdate} onOpenDetail={onOpenDetail} />
+            ))
+          )}
         </div>
       </SortableContext>
     </div>
@@ -632,7 +691,31 @@ function KanbanColumn({
 function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }) {
   const [items, setItems] = useState<BacklogItemData[]>(initialItems);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [groupByCapability, setGroupByCapability] = useState(true);
+  const [capabilityFilter, setCapabilityFilter] = useState<string[]>([]);
   const { mutate } = useSWRConfig();
+
+  // Fetch capabilities list (for grouping swim lanes)
+  const { data: capabilities } = useSWR<{ id: string; name: string; sdlc_phase: string }[]>(
+    "/api/capabilities",
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+
+  // Build a combined capability map for both feature and bug item types
+  const { data: featureCapMap } = useSWR<Record<string, string[]>>(
+    "/api/capabilities/item-map?itemType=feature",
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+  const { data: bugCapMap } = useSWR<Record<string, string[]>>(
+    "/api/capabilities/item-map?itemType=bug",
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+  const capabilityMap = useMemo(() => {
+    return { ...featureCapMap, ...bugCapMap };
+  }, [featureCapMap, bugCapMap]);
 
   /** Track the original column & status when a drag starts so handleDragEnd
    *  can detect cross-column moves even after handleDragOver optimistically
@@ -684,13 +767,25 @@ function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
+  // Apply capability filter to items
+  const filteredItems = useMemo(() => {
+    if (capabilityFilter.length === 0) return items;
+    return items.filter((item) => {
+      const itemCaps = capabilityMap?.[item.item_id] ?? [];
+      if (capabilityFilter.includes("ungrouped") && itemCaps.length === 0) return true;
+      const nonUngrouped = capabilityFilter.filter((id) => id !== "ungrouped");
+      if (nonUngrouped.length > 0 && nonUngrouped.some((id) => itemCaps.includes(id))) return true;
+      return false;
+    });
+  }, [items, capabilityFilter, capabilityMap]);
+
   /** Group items by column */
   const columnItems = useMemo(() => {
     const grouped: Record<string, BacklogItemData[]> = {};
     for (const col of KANBAN_COLUMNS) {
       grouped[col.id] = [];
     }
-    for (const item of items) {
+    for (const item of filteredItems) {
       const status = item.item_status ?? item.status ?? "draft";
       const colId = STATUS_TO_COLUMN[status] ?? "draft";
       if (grouped[colId]) {
@@ -702,7 +797,7 @@ function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }
       grouped[colId].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
     }
     return grouped;
-  }, [items]);
+  }, [filteredItems]);
 
   const activeItem = activeId ? items.find((i) => i.id === activeId) : null;
 
@@ -907,8 +1002,24 @@ function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }
           Product Backlog
         </h3>
         <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-          {items.length} items
+          {filteredItems.length}{capabilityFilter.length > 0 ? `/${items.length}` : ""} items
         </span>
+        <div className="flex-1" />
+        <CapabilityFilter
+          selectedIds={capabilityFilter}
+          onChange={setCapabilityFilter}
+        />
+        <button
+          type="button"
+          onClick={() => setGroupByCapability(!groupByCapability)}
+          className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors border ${
+            groupByCapability
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-muted/50 text-muted-foreground border-transparent hover:bg-muted"
+          }`}
+        >
+          {groupByCapability ? "Grouped by Capability" : "Group by Capability"}
+        </button>
       </div>
 
       {/* Kanban board */}
@@ -928,6 +1039,9 @@ function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }
               items={columnItems[col.id] ?? []}
               onItemUpdate={handleAIActionUpdate}
               onOpenDetail={handleOpenDetail}
+              groupByCapability={groupByCapability}
+              capabilityMap={capabilityMap}
+              capabilities={capabilities}
             />
           ))}
         </div>

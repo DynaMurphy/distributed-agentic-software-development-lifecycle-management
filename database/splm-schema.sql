@@ -660,3 +660,184 @@ CREATE INDEX IF NOT EXISTS idx_backlog_item ON backlog_items (item_type, item_id
 
 CREATE INDEX IF NOT EXISTS idx_links_item ON item_document_links (item_type, item_id) WHERE transaction_to = 'infinity';
 CREATE INDEX IF NOT EXISTS idx_links_document ON item_document_links (document_id) WHERE transaction_to = 'infinity';
+
+
+-- =============================================================================
+-- 6. CAPABILITIES TABLE (functional SDLC capability areas)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS capabilities (
+    id UUID NOT NULL,
+    version_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    sdlc_phase VARCHAR(50) NOT NULL DEFAULT 'platform'
+        CHECK (sdlc_phase IN ('strategy_planning', 'prioritization', 'specification', 'implementation', 'verification', 'delivery', 'post_delivery', 'platform')),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'archived')),
+    maintained_by UUID REFERENCES "User"(id),
+    valid_from TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    valid_to TIMESTAMP WITH TIME ZONE DEFAULT 'infinity'
+);
+
+SELECT periods.add_period('capabilities', 'validity', 'valid_from', 'valid_to');
+SELECT periods.add_system_time_period('capabilities', 'transaction_from', 'transaction_to');
+SELECT periods.add_unique_key('capabilities', ARRAY['id'], 'validity');
+
+CREATE OR REPLACE VIEW current_capabilities AS
+SELECT id, version_id, name, description, sdlc_phase, sort_order, status, maintained_by, valid_from, valid_to
+FROM capabilities
+WHERE transaction_to = 'infinity';
+
+CREATE OR REPLACE FUNCTION insert_capability_version(
+    p_id UUID,
+    p_name VARCHAR(100),
+    p_description TEXT DEFAULT NULL,
+    p_sdlc_phase VARCHAR(50) DEFAULT 'platform',
+    p_sort_order INTEGER DEFAULT 0,
+    p_status VARCHAR(20) DEFAULT 'active',
+    p_valid_from TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    p_maintained_by UUID DEFAULT NULL
+) RETURNS UUID AS $$
+DECLARE
+    new_version_id UUID;
+BEGIN
+    INSERT INTO capabilities (
+        id, name, description, sdlc_phase, sort_order, status, maintained_by,
+        valid_from, valid_to, transaction_from, transaction_to
+    ) VALUES (
+        p_id, p_name, p_description, p_sdlc_phase, p_sort_order, p_status, p_maintained_by,
+        p_valid_from, 'infinity', p_valid_from, 'infinity'
+    )
+    RETURNING version_id INTO new_version_id;
+    RETURN new_version_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION update_capability_version(
+    p_id UUID,
+    p_name VARCHAR(100) DEFAULT NULL,
+    p_description TEXT DEFAULT NULL,
+    p_sdlc_phase VARCHAR(50) DEFAULT NULL,
+    p_sort_order INTEGER DEFAULT NULL,
+    p_status VARCHAR(20) DEFAULT NULL,
+    p_valid_from TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    p_maintained_by UUID DEFAULT NULL
+) RETURNS UUID AS $$
+DECLARE
+    current_version_id UUID;
+    update_timestamp TIMESTAMP WITH TIME ZONE;
+    new_version_id UUID;
+    c_name VARCHAR(100); c_description TEXT; c_sdlc_phase VARCHAR(50);
+    c_sort_order INTEGER; c_status VARCHAR(20); c_maintained_by UUID;
+BEGIN
+    update_timestamp := p_valid_from;
+
+    SELECT version_id INTO current_version_id
+    FROM current_capabilities WHERE id = p_id
+    ORDER BY valid_from DESC LIMIT 1;
+
+    IF current_version_id IS NULL THEN
+        RAISE EXCEPTION 'Capability not found: %', p_id;
+    END IF;
+
+    SELECT c.name, c.description, c.sdlc_phase, c.sort_order, c.status, c.maintained_by
+    INTO c_name, c_description, c_sdlc_phase, c_sort_order, c_status, c_maintained_by
+    FROM capabilities c WHERE c.version_id = current_version_id;
+
+    UPDATE capabilities
+    SET valid_to = update_timestamp, transaction_to = update_timestamp
+    WHERE version_id = current_version_id AND valid_to = 'infinity';
+
+    INSERT INTO capabilities (
+        id, name, description, sdlc_phase, sort_order, status, maintained_by,
+        valid_from, valid_to, transaction_from, transaction_to
+    ) VALUES (
+        p_id,
+        COALESCE(p_name, c_name),
+        COALESCE(p_description, c_description),
+        COALESCE(p_sdlc_phase, c_sdlc_phase),
+        COALESCE(p_sort_order, c_sort_order),
+        COALESCE(p_status, c_status),
+        COALESCE(p_maintained_by, c_maintained_by),
+        update_timestamp, 'infinity', update_timestamp, 'infinity'
+    )
+    RETURNING version_id INTO new_version_id;
+    RETURN new_version_id;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- =============================================================================
+-- 7. CAPABILITY ITEMS TABLE (many-to-many: capabilities ↔ features/bugs/tasks)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS capability_items (
+    id UUID NOT NULL,
+    version_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    capability_id UUID NOT NULL,
+    item_type VARCHAR(10) NOT NULL
+        CHECK (item_type IN ('feature', 'bug', 'task')),
+    item_id UUID NOT NULL,
+    maintained_by UUID REFERENCES "User"(id),
+    valid_from TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    valid_to TIMESTAMP WITH TIME ZONE DEFAULT 'infinity'
+);
+
+SELECT periods.add_period('capability_items', 'validity', 'valid_from', 'valid_to');
+SELECT periods.add_system_time_period('capability_items', 'transaction_from', 'transaction_to');
+SELECT periods.add_unique_key('capability_items', ARRAY['id'], 'validity');
+
+CREATE OR REPLACE VIEW current_capability_items AS
+SELECT id, version_id, capability_id, item_type, item_id, maintained_by, valid_from, valid_to
+FROM capability_items
+WHERE transaction_to = 'infinity';
+
+CREATE OR REPLACE FUNCTION insert_capability_item_version(
+    p_id UUID,
+    p_capability_id UUID,
+    p_item_type VARCHAR(10),
+    p_item_id UUID,
+    p_valid_from TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    p_maintained_by UUID DEFAULT NULL
+) RETURNS UUID AS $$
+DECLARE
+    new_version_id UUID;
+BEGIN
+    INSERT INTO capability_items (
+        id, capability_id, item_type, item_id, maintained_by,
+        valid_from, valid_to, transaction_from, transaction_to
+    ) VALUES (
+        p_id, p_capability_id, p_item_type, p_item_id, p_maintained_by,
+        p_valid_from, 'infinity', p_valid_from, 'infinity'
+    )
+    RETURNING version_id INTO new_version_id;
+    RETURN new_version_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION delete_capability_item(
+    p_id UUID,
+    p_valid_from TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+) RETURNS VOID AS $$
+DECLARE
+    current_version_id UUID;
+BEGIN
+    SELECT version_id INTO current_version_id
+    FROM current_capability_items WHERE id = p_id
+    ORDER BY valid_from DESC LIMIT 1;
+
+    IF current_version_id IS NULL THEN
+        RAISE EXCEPTION 'Capability item link not found: %', p_id;
+    END IF;
+
+    UPDATE capability_items
+    SET valid_to = p_valid_from, transaction_to = p_valid_from
+    WHERE version_id = current_version_id AND valid_to = 'infinity';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Capability indexes
+CREATE INDEX IF NOT EXISTS idx_capabilities_id_valid ON capabilities (id, valid_from DESC);
+CREATE INDEX IF NOT EXISTS idx_capabilities_phase ON capabilities (sdlc_phase) WHERE transaction_to = 'infinity';
+CREATE INDEX IF NOT EXISTS idx_capability_items_capability ON capability_items (capability_id) WHERE transaction_to = 'infinity';
+CREATE INDEX IF NOT EXISTS idx_capability_items_item ON capability_items (item_type, item_id) WHERE transaction_to = 'infinity';

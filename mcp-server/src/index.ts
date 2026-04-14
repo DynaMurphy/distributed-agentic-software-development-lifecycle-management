@@ -32,6 +32,14 @@ import {
   getRepositoryById,
   createRepository,
   updateRepository,
+  createCapability,
+  updateCapability,
+  getCapabilityById,
+  listCapabilities,
+  addItemToCapability,
+  removeItemFromCapability,
+  getCapabilityItems,
+  getItemCapabilities,
 } from "./db.js";
 import { generateAIText } from "./ai.js";
 
@@ -124,6 +132,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["edits"],
         },
       },
+      {
+        name: "create_spec",
+        description: "Create a new specification document with optional parent for hierarchy.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Title of the new spec document." },
+            content: { type: "string", description: "Markdown content of the spec." },
+            parent_id: { type: "string", description: "Optional: UUID of parent document for sub-documents." },
+            sort_order: { type: "number", description: "Optional: sort order within parent (default 0)." },
+          },
+          required: ["title", "content"],
+        },
+      },
+      {
+        name: "update_spec_metadata",
+        description: "Update metadata of a spec document (title, parent, sort order) without changing content.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "UUID of the spec document to update." },
+            title: { type: "string", description: "Optional: new title." },
+            parent_id: { type: "string", description: "Optional: new parent document UUID. Use null to unparent." },
+            sort_order: { type: "number", description: "Optional: new sort order within parent." },
+          },
+          required: ["id"],
+        },
+      },
 
       // ── Repository Tools ────────────────────────────────────
       {
@@ -181,7 +217,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // ── Feature Tools ───────────────────────────────────────
       {
         name: "list_features",
-        description: "List all features, optionally filtered by status, priority, feature_type, or repository.",
+        description: "List all features, optionally filtered by status, priority, feature_type, repository, or capability.",
         inputSchema: {
           type: "object",
           properties: {
@@ -189,6 +225,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             priority: { type: "string", description: PRIORITY_DESC },
             feature_type: { type: "string", description: "Filter by type: feature or sub_feature" },
             repository_id: { type: "string", description: "Filter by repository UUID" },
+            capability_id: { type: "string", description: "Filter by capability UUID" },
           },
         },
       },
@@ -242,7 +279,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // ── Bug Tools ───────────────────────────────────────────
       {
         name: "list_bugs",
-        description: "List all bugs, optionally filtered by status, severity, priority, or repository.",
+        description: "List all bugs, optionally filtered by status, severity, priority, repository, or capability.",
         inputSchema: {
           type: "object",
           properties: {
@@ -250,6 +287,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             severity: { type: "string", description: "Severity: blocker, critical, major, minor, trivial" },
             priority: { type: "string", description: PRIORITY_DESC },
             repository_id: { type: "string", description: "Filter by repository UUID" },
+            capability_id: { type: "string", description: "Filter by capability UUID" },
           },
         },
       },
@@ -511,6 +549,94 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
 
+      // ── Capability Tools ────────────────────────────────────
+      {
+        name: "list_capabilities",
+        description: "List all functional capabilities (SDLC capability areas), optionally filtered by status or sdlc_phase.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            status: { type: "string", description: "Filter by status: active, archived" },
+            sdlc_phase: { type: "string", description: "Filter by SDLC phase: strategy_planning, prioritization, specification, implementation, verification, delivery, post_delivery, platform" },
+          },
+        },
+      },
+      {
+        name: "read_capability",
+        description: "Read full details of a capability by ID, including linked features, bugs, and tasks.",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "Capability UUID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "create_capability",
+        description: "Create a new functional capability area.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Capability name (e.g. 'Feature Management')" },
+            description: { type: "string", description: "Description of what this capability covers" },
+            sdlc_phase: { type: "string", description: "SDLC phase: strategy_planning, prioritization, specification, implementation, verification, delivery, post_delivery, platform" },
+            sort_order: { type: "number", description: "Display ordering (lower = first)" },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "update_capability",
+        description: "Update fields on an existing capability. Only provide fields you want to change.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Capability UUID" },
+            name: { type: "string", description: "New name" },
+            description: { type: "string", description: "New description" },
+            sdlc_phase: { type: "string", description: "New SDLC phase" },
+            sort_order: { type: "number", description: "New display ordering" },
+            status: { type: "string", description: "Status: active, archived" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "assign_capability",
+        description: "Assign a feature, bug, or task to a capability area.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capability_id: { type: "string", description: "Capability UUID" },
+            item_type: { type: "string", description: "Item type: feature, bug, or task" },
+            item_id: { type: "string", description: "Item UUID" },
+          },
+          required: ["capability_id", "item_type", "item_id"],
+        },
+      },
+      {
+        name: "unassign_capability",
+        description: "Remove a feature, bug, or task from a capability area.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            link_id: { type: "string", description: "The capability-item link UUID (from read_capability or get_item_capabilities)" },
+          },
+          required: ["link_id"],
+        },
+      },
+      {
+        name: "get_item_capabilities",
+        description: "Get all capabilities assigned to a given feature, bug, or task.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            item_type: { type: "string", description: "Item type: feature, bug, or task" },
+            item_id: { type: "string", description: "Item UUID" },
+          },
+          required: ["item_type", "item_id"],
+        },
+      },
+
       // ── Workflow Tools ──────────────────────────────────────
       {
         name: "workflow_status",
@@ -549,9 +675,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "read_spec") {
       const doc = await getSpecDoc(args.id);
       if (!doc) return { content: [{ type: "text", text: "No spec document found." }] };
-      // Content is stored as markdown
       const markdown = typeof doc.content === 'string' ? doc.content : String(doc.content);
-      return { content: [{ type: "text", text: `# ${doc.title}\n\n${markdown}` }] };
+
+      // If this document has children, append a list of sub-documents
+      const allDocs = await listDocuments();
+      const children = allDocs.filter((d: any) => d.parent_id === doc.id).sort((a: any, b: any) => a.sort_order - b.sort_order);
+      let childrenSection = "";
+      if (children.length > 0) {
+        childrenSection = "\n\n---\n\n## Sub-documents\n\n" + children.map((c: any, i: number) => `${i + 1}. [${c.title}](splm://doc/${c.id})`).join("\n");
+      }
+
+      return { content: [{ type: "text", text: `# ${doc.title}\n\n${markdown}${childrenSection}` }] };
     }
 
     if (name === "append_spec_note") {
@@ -596,6 +730,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{ type: "text", text: `Applied ${applied}/${args.edits.length} edits successfully.` }],
       };
+    }
+
+    if (name === "create_spec") {
+      if (!args.title || !args.content) throw new Error("title and content are required");
+      const id = crypto.randomUUID();
+      await createDocument({
+        id,
+        title: args.title,
+        content: args.content,
+        maintainedBy: MCP_ASSISTANT_USER_ID,
+        parentId: args.parent_id ?? null,
+        sortOrder: args.sort_order ?? 0,
+      });
+      return { content: [{ type: "text", text: JSON.stringify({ id, title: args.title, parent_id: args.parent_id ?? null, sort_order: args.sort_order ?? 0 }, null, 2) }] };
+    }
+
+    if (name === "update_spec_metadata") {
+      if (!args.id) throw new Error("id is required");
+      const updates: Record<string, any> = {};
+      if (args.title !== undefined) updates.title = args.title;
+      if (args.parent_id !== undefined) updates.parent_id = args.parent_id;
+      if (args.sort_order !== undefined) updates.sort_order = args.sort_order;
+
+      await query('SELECT update_document_metadata($1::uuid, $2::varchar, $3::uuid, $4::integer, $5::uuid)', [
+        args.id,
+        args.title ?? null,
+        args.parent_id ?? null,
+        args.sort_order ?? null,
+        MCP_ASSISTANT_USER_ID,
+      ]);
+      return { content: [{ type: "text", text: `Metadata updated for document ${args.id}.` }] };
     }
 
     // ── Repository Handlers ──────────────────────────────────
@@ -650,13 +815,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // ── Feature Handlers ────────────────────────────────────
 
     if (name === "list_features") {
-      let sql = 'SELECT DISTINCT ON (id) id, title, feature_type, status, priority, repository_id, valid_from FROM current_features WHERE 1=1';
+      let sql = 'SELECT DISTINCT ON (f.id) f.id, f.title, f.feature_type, f.status, f.priority, f.repository_id, f.valid_from FROM current_features f';
       const params: any[] = [];
-      if (args.status) { params.push(args.status); sql += ` AND status = $${params.length}`; }
-      if (args.priority) { params.push(args.priority); sql += ` AND priority = $${params.length}`; }
-      if (args.feature_type) { params.push(args.feature_type); sql += ` AND feature_type = $${params.length}`; }
-      if (args.repository_id) { params.push(args.repository_id); sql += ` AND repository_id = $${params.length}`; }
-      sql += ' ORDER BY id, valid_from DESC';
+      if (args.capability_id) {
+        params.push(args.capability_id);
+        sql += ` JOIN current_capability_items ci ON ci.item_type = 'feature' AND ci.item_id = f.id AND ci.valid_to = 'infinity' AND ci.capability_id = $${params.length}`;
+      }
+      sql += ' WHERE 1=1';
+      if (args.status) { params.push(args.status); sql += ` AND f.status = $${params.length}`; }
+      if (args.priority) { params.push(args.priority); sql += ` AND f.priority = $${params.length}`; }
+      if (args.feature_type) { params.push(args.feature_type); sql += ` AND f.feature_type = $${params.length}`; }
+      if (args.repository_id) { params.push(args.repository_id); sql += ` AND f.repository_id = $${params.length}`; }
+      sql += ' ORDER BY f.id, f.valid_from DESC';
       const result = await query(sql, params);
       return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
     }
@@ -664,13 +834,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "read_feature") {
       const feature = await getFeatureById(args.id);
       if (!feature) return { content: [{ type: "text", text: "Feature not found." }] };
-      const subs = await getSubFeatures(args.id);
-      const tasks = await listTasks({ parentType: "feature", parentId: args.id });
-      const docs = await getDocumentsForItem("feature", args.id);
+      const [subs, tasks, docs, capabilities] = await Promise.all([
+        getSubFeatures(args.id),
+        listTasks({ parentType: "feature", parentId: args.id }),
+        getDocumentsForItem("feature", args.id),
+        getItemCapabilities("feature", args.id),
+      ]);
       return {
         content: [{
           type: "text",
-          text: JSON.stringify({ ...feature, sub_features: subs, tasks, linked_documents: docs }, null, 2),
+          text: JSON.stringify({ ...feature, sub_features: subs, tasks, linked_documents: docs, capabilities }, null, 2),
         }],
       };
     }
@@ -728,13 +901,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // ── Bug Handlers ────────────────────────────────────────
 
     if (name === "list_bugs") {
-      let sql = 'SELECT DISTINCT ON (id) id, title, severity, status, priority, repository_id, valid_from FROM current_bugs WHERE 1=1';
+      let sql = 'SELECT DISTINCT ON (b.id) b.id, b.title, b.severity, b.status, b.priority, b.repository_id, b.valid_from FROM current_bugs b';
       const params: any[] = [];
-      if (args.status) { params.push(args.status); sql += ` AND status = $${params.length}`; }
-      if (args.severity) { params.push(args.severity); sql += ` AND severity = $${params.length}`; }
-      if (args.priority) { params.push(args.priority); sql += ` AND priority = $${params.length}`; }
-      if (args.repository_id) { params.push(args.repository_id); sql += ` AND repository_id = $${params.length}`; }
-      sql += ' ORDER BY id, valid_from DESC';
+      if (args.capability_id) {
+        params.push(args.capability_id);
+        sql += ` JOIN current_capability_items ci ON ci.item_type = 'bug' AND ci.item_id = b.id AND ci.valid_to = 'infinity' AND ci.capability_id = $${params.length}`;
+      }
+      sql += ' WHERE 1=1';
+      if (args.status) { params.push(args.status); sql += ` AND b.status = $${params.length}`; }
+      if (args.severity) { params.push(args.severity); sql += ` AND b.severity = $${params.length}`; }
+      if (args.priority) { params.push(args.priority); sql += ` AND b.priority = $${params.length}`; }
+      if (args.repository_id) { params.push(args.repository_id); sql += ` AND b.repository_id = $${params.length}`; }
+      sql += ' ORDER BY b.id, b.valid_from DESC';
       const result = await query(sql, params);
       return { content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }] };
     }
@@ -742,12 +920,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "read_bug") {
       const bug = await getBugById(args.id);
       if (!bug) return { content: [{ type: "text", text: "Bug not found." }] };
-      const tasks = await listTasks({ parentType: "bug", parentId: args.id });
-      const docs = await getDocumentsForItem("bug", args.id);
+      const [tasks, docs, capabilities] = await Promise.all([
+        listTasks({ parentType: "bug", parentId: args.id }),
+        getDocumentsForItem("bug", args.id),
+        getItemCapabilities("bug", args.id),
+      ]);
       return {
         content: [{
           type: "text",
-          text: JSON.stringify({ ...bug, tasks, linked_documents: docs }, null, 2),
+          text: JSON.stringify({ ...bug, tasks, linked_documents: docs, capabilities }, null, 2),
         }],
       };
     }
@@ -954,7 +1135,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "link_document") {
       const linkId = crypto.randomUUID();
       await query('SELECT insert_item_document_link_version($1, $2, $3, $4, $5, $6, $7)',
-        [linkId, args.item_type, args.item_id, args.document_id, args.link_type || 'specification', null, MCP_ASSISTANT_USER_ID]);
+        [linkId, args.item_type, args.item_id, args.document_id, args.link_type || 'specification', new Date(), MCP_ASSISTANT_USER_ID]);
       return {
         content: [{ type: "text", text: `Document ${args.document_id} linked to ${args.item_type} ${args.item_id} (link_id: ${linkId}).` }],
       };
@@ -1258,6 +1439,96 @@ Output ONLY valid JSON.`,
           }, null, 2),
         }],
       };
+    }
+
+    // ── Capability Handlers ────────────────────────────────
+
+    if (name === "list_capabilities") {
+      const caps = await listCapabilities({
+        status: args.status,
+        sdlcPhase: args.sdlc_phase,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(caps, null, 2) }] };
+    }
+
+    if (name === "read_capability") {
+      if (!args.id) throw new Error("ID is required");
+      const cap = await getCapabilityById(args.id);
+      if (!cap) return { content: [{ type: "text", text: "Capability not found." }] };
+      const items = await getCapabilityItems(args.id);
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ ...cap, items }, null, 2),
+        }],
+      };
+    }
+
+    if (name === "create_capability") {
+      if (!args.name) throw new Error("Name is required");
+      const id = crypto.randomUUID();
+      const versionId = await createCapability({
+        id,
+        name: args.name,
+        description: args.description,
+        sdlcPhase: args.sdlc_phase,
+        sortOrder: args.sort_order,
+        maintainedBy: MCP_ASSISTANT_USER_ID,
+      });
+      const cap = await getCapabilityById(id);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ created: true, id, versionId, capability: cap }, null, 2) }],
+      };
+    }
+
+    if (name === "update_capability") {
+      if (!args.id) throw new Error("ID is required");
+      const versionId = await updateCapability({
+        id: args.id,
+        name: args.name,
+        description: args.description,
+        sdlcPhase: args.sdlc_phase,
+        sortOrder: args.sort_order,
+        status: args.status,
+        maintainedBy: MCP_ASSISTANT_USER_ID,
+      });
+      const cap = await getCapabilityById(args.id);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ updated: true, versionId, capability: cap }, null, 2) }],
+      };
+    }
+
+    if (name === "assign_capability") {
+      if (!args.capability_id || !args.item_type || !args.item_id) {
+        throw new Error("capability_id, item_type, and item_id are required");
+      }
+      const id = crypto.randomUUID();
+      const versionId = await addItemToCapability({
+        id,
+        capabilityId: args.capability_id,
+        itemType: args.item_type,
+        itemId: args.item_id,
+        maintainedBy: MCP_ASSISTANT_USER_ID,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify({ assigned: true, linkId: id, versionId }, null, 2) }],
+      };
+    }
+
+    if (name === "unassign_capability") {
+      if (!args.link_id) throw new Error("link_id is required");
+      await removeItemFromCapability(args.link_id);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ unassigned: true, linkId: args.link_id }, null, 2) }],
+      };
+    }
+
+    if (name === "get_item_capabilities") {
+      if (!args.item_type || !args.item_id) {
+        throw new Error("item_type and item_id are required");
+      }
+      const caps = await getItemCapabilities(args.item_type, args.item_id);
+      return { content: [{ type: "text", text: JSON.stringify(caps, null, 2) }] };
     }
 
     // ── Workflow Handler ────────────────────────────────────

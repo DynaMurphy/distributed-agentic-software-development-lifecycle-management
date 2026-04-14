@@ -48,6 +48,17 @@ export type TaskStatus = "todo" | "in_progress" | "done" | "blocked";
 export type ItemType = "feature" | "bug" | "task";
 export type LinkType = "specification" | "test_plan" | "design" | "reference";
 export type RepositoryStatus = "active" | "archived";
+export type CapabilityStatus = "active" | "archived";
+export type RoadmapHorizon = "now" | "next" | "later";
+export type SdlcPhase =
+  | "strategy_planning"
+  | "prioritization"
+  | "specification"
+  | "implementation"
+  | "verification"
+  | "delivery"
+  | "post_delivery"
+  | "platform";
 
 /** Well-known UUID for the default / local repository */
 export const DEFAULT_REPOSITORY_ID = "00000000-0000-0000-0000-000000000001";
@@ -95,6 +106,9 @@ export interface BitemporalFeature {
   maintained_by: string | null;
   maintained_by_email: string | null;
   repository_id: string;
+  planned_start: string | null;
+  planned_end: string | null;
+  roadmap_horizon: RoadmapHorizon | null;
   valid_from: Date;
   valid_to: Date;
 }
@@ -107,6 +121,9 @@ export interface BitemporalFeatureSummary {
   status: CascadeStatus;
   priority: Priority;
   repository_id: string;
+  planned_start: string | null;
+  planned_end: string | null;
+  roadmap_horizon: RoadmapHorizon | null;
   valid_from: Date;
 }
 
@@ -358,6 +375,98 @@ export async function listFeatures(filters?: {
   }
 }
 
+// =============================================================================
+// ROADMAP QUERIES
+// =============================================================================
+
+export interface RoadmapItem {
+  id: string;
+  version_id: string;
+  title: string;
+  feature_type: FeatureType;
+  status: CascadeStatus;
+  priority: Priority;
+  effort_estimate: string | null;
+  planned_start: string | null;
+  planned_end: string | null;
+  roadmap_horizon: RoadmapHorizon | null;
+  parent_id: string | null;
+  capability_name: string | null;
+  capability_id: string | null;
+  task_total: number;
+  task_done: number;
+  repository_id: string;
+}
+
+export async function getRoadmapItems(filters?: {
+  capabilityId?: string;
+  priority?: Priority;
+  status?: CascadeStatus;
+  horizon?: RoadmapHorizon;
+  repositoryId?: string;
+}): Promise<RoadmapItem[]> {
+  try {
+    let query = `
+      SELECT DISTINCT ON (f.id)
+        f.id, f.version_id, f.title, f.feature_type, f.status, f.priority,
+        f.effort_estimate, f.planned_start, f.planned_end, f.roadmap_horizon,
+        f.parent_id, f.repository_id,
+        c.name AS capability_name,
+        c.id AS capability_id,
+        (SELECT COUNT(*)::int FROM current_tasks t WHERE t.parent_id = f.id AND t.valid_to = 'infinity') AS task_total,
+        (SELECT COUNT(*)::int FROM current_tasks t WHERE t.parent_id = f.id AND t.valid_to = 'infinity' AND t.status = 'done') AS task_done
+      FROM current_features f
+      LEFT JOIN current_capability_items ci ON ci.item_id = f.id AND ci.item_type = 'feature' AND ci.valid_to = 'infinity'
+      LEFT JOIN current_capabilities c ON c.id = ci.capability_id AND c.valid_to = 'infinity'
+      WHERE f.valid_to = 'infinity'
+        AND f.feature_type = 'feature'
+        AND f.status NOT IN ('rejected')
+    `;
+    const conditions: string[] = [];
+    if (filters?.capabilityId) conditions.push(`c.id = '${filters.capabilityId}'`);
+    if (filters?.priority) conditions.push(`f.priority = '${filters.priority}'`);
+    if (filters?.status) conditions.push(`f.status = '${filters.status}'`);
+    if (filters?.horizon) conditions.push(`f.roadmap_horizon = '${filters.horizon}'`);
+    if (filters?.repositoryId) conditions.push(`f.repository_id = '${filters.repositoryId}'`);
+
+    if (conditions.length > 0) {
+      query += ` AND ${conditions.join(" AND ")}`;
+    }
+    query += " ORDER BY f.id, f.valid_from DESC";
+
+    const rows = await client.unsafe(query);
+    return rows as unknown as RoadmapItem[];
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to get roadmap items");
+  }
+}
+
+export async function updateRoadmapSchedule(params: {
+  id: string;
+  plannedStart?: string | null;
+  plannedEnd?: string | null;
+  maintainedBy?: string;
+}): Promise<string> {
+  return updateFeature({
+    id: params.id,
+    plannedStart: params.plannedStart,
+    plannedEnd: params.plannedEnd,
+    maintainedBy: params.maintainedBy,
+  });
+}
+
+export async function updateRoadmapHorizon(params: {
+  id: string;
+  roadmapHorizon: RoadmapHorizon;
+  maintainedBy?: string;
+}): Promise<string> {
+  return updateFeature({
+    id: params.id,
+    roadmapHorizon: params.roadmapHorizon,
+    maintainedBy: params.maintainedBy,
+  });
+}
+
 export async function getFeatureById(id: string): Promise<BitemporalFeature | null> {
   try {
     const rows = await client`
@@ -510,6 +619,9 @@ export async function updateFeature(params: {
   tags?: string[];
   aiMetadata?: Record<string, unknown>;
   maintainedBy?: string;
+  plannedStart?: string | null;
+  plannedEnd?: string | null;
+  roadmapHorizon?: RoadmapHorizon | null;
 }): Promise<string> {
   try {
     const rows = await client`
@@ -526,7 +638,11 @@ export async function updateFeature(params: {
         ${params.tags ? toJsonbString(params.tags, "[]") : null}::jsonb,
         ${params.aiMetadata ? toJsonbString(params.aiMetadata) : null}::jsonb,
         ${new Date()}::timestamptz,
-        ${params.maintainedBy ?? null}::uuid
+        ${params.maintainedBy ?? null}::uuid,
+        ${null}::uuid,
+        ${params.plannedStart ?? null}::timestamptz,
+        ${params.plannedEnd ?? null}::timestamptz,
+        ${params.roadmapHorizon ?? null}::varchar
       ) AS version_id
     `;
     return rows[0].version_id as string;
@@ -1201,5 +1317,224 @@ export async function getDocumentLinksWithTitles(
     return rows as unknown as (BitemporalItemDocumentLink & { document_title: string })[];
   } catch (_error) {
     throw new ChatSDKError("bad_request:database", "Failed to get document links with titles");
+  }
+}
+
+// =============================================================================
+// CAPABILITIES
+// =============================================================================
+
+export interface BitemporalCapability {
+  id: string;
+  version_id: string;
+  name: string;
+  description: string | null;
+  sdlc_phase: SdlcPhase;
+  sort_order: number;
+  status: CapabilityStatus;
+  maintained_by: string | null;
+  valid_from: Date;
+  valid_to: Date;
+}
+
+export interface BitemporalCapabilitySummary {
+  id: string;
+  name: string;
+  sdlc_phase: SdlcPhase;
+  sort_order: number;
+  status: CapabilityStatus;
+  feature_count: number;
+  bug_count: number;
+  task_count: number;
+}
+
+export interface BitemporalCapabilityItem {
+  id: string;
+  version_id: string;
+  capability_id: string;
+  item_type: ItemType;
+  item_id: string;
+  valid_from: Date;
+  valid_to: Date;
+}
+
+/** List capabilities with optional filters and item counts */
+export async function listCapabilities(filters?: {
+  status?: CapabilityStatus;
+  sdlc_phase?: SdlcPhase;
+}): Promise<BitemporalCapabilitySummary[]> {
+  try {
+    const conditions: string[] = ["c.valid_to = 'infinity'"];
+    if (filters?.status) conditions.push(`c.status = '${filters.status}'`);
+    if (filters?.sdlc_phase) conditions.push(`c.sdlc_phase = '${filters.sdlc_phase}'`);
+
+    const rows = await client`
+      SELECT
+        c.id, c.name, c.sdlc_phase, c.sort_order, c.status,
+        COALESCE(SUM(CASE WHEN ci.item_type = 'feature' THEN 1 ELSE 0 END), 0)::int AS feature_count,
+        COALESCE(SUM(CASE WHEN ci.item_type = 'bug' THEN 1 ELSE 0 END), 0)::int AS bug_count,
+        COALESCE(SUM(CASE WHEN ci.item_type = 'task' THEN 1 ELSE 0 END), 0)::int AS task_count
+      FROM current_capabilities c
+      LEFT JOIN current_capability_items ci
+        ON ci.capability_id = c.id AND ci.valid_to = 'infinity'
+      WHERE ${client.unsafe(conditions.join(" AND "))}
+      GROUP BY c.id, c.name, c.sdlc_phase, c.sort_order, c.status
+      ORDER BY c.sort_order ASC
+    `;
+    return rows as unknown as BitemporalCapabilitySummary[];
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to list capabilities");
+  }
+}
+
+/** Get a single capability by ID with full details */
+export async function getCapabilityById(id: string): Promise<BitemporalCapability | null> {
+  try {
+    const rows = await client`
+      SELECT * FROM current_capabilities
+      WHERE id = ${id} AND valid_to = 'infinity'
+      ORDER BY valid_from DESC LIMIT 1
+    `;
+    return (rows[0] as unknown as BitemporalCapability) ?? null;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to get capability");
+  }
+}
+
+/** Get all items assigned to a capability */
+export async function getCapabilityItems(capabilityId: string): Promise<{
+  features: BitemporalFeatureSummary[];
+  bugs: { id: string; title: string; status: string; severity: string; priority: string }[];
+}> {
+  try {
+    const featureRows = await client`
+      SELECT f.id, f.title, f.status, f.priority, f.feature_type, f.repository_id, f.valid_from
+      FROM current_capability_items ci
+      JOIN current_features f ON ci.item_id = f.id AND f.valid_to = 'infinity'
+      WHERE ci.capability_id = ${capabilityId}
+        AND ci.item_type = 'feature'
+        AND ci.valid_to = 'infinity'
+      ORDER BY f.valid_from DESC
+    `;
+    const bugRows = await client`
+      SELECT b.id, b.title, b.status, b.severity, b.priority
+      FROM current_capability_items ci
+      JOIN current_bugs b ON ci.item_id = b.id AND b.valid_to = 'infinity'
+      WHERE ci.capability_id = ${capabilityId}
+        AND ci.item_type = 'bug'
+        AND ci.valid_to = 'infinity'
+      ORDER BY b.valid_from DESC
+    `;
+    return {
+      features: featureRows as unknown as BitemporalFeatureSummary[],
+      bugs: bugRows as unknown as { id: string; title: string; status: string; severity: string; priority: string }[],
+    };
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to get capability items");
+  }
+}
+
+/** Get capabilities for a given item (feature/bug/task) */
+export async function getCapabilitiesForItem(
+  itemType: ItemType,
+  itemId: string
+): Promise<{ id: string; name: string; sdlc_phase: SdlcPhase; link_id: string }[]> {
+  try {
+    const rows = await client`
+      SELECT c.id, c.name, c.sdlc_phase, ci.id AS link_id
+      FROM current_capability_items ci
+      JOIN current_capabilities c ON ci.capability_id = c.id AND c.valid_to = 'infinity'
+      WHERE ci.item_type = ${itemType} AND ci.item_id = ${itemId}
+        AND ci.valid_to = 'infinity'
+      ORDER BY c.sort_order ASC
+    `;
+    return rows as unknown as { id: string; name: string; sdlc_phase: SdlcPhase; link_id: string }[];
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to get capabilities for item");
+  }
+}
+
+/** Assign an item to a capability */
+export async function assignItemToCapability(params: {
+  capabilityId: string;
+  itemType: ItemType;
+  itemId: string;
+  maintainedBy?: string;
+}): Promise<string> {
+  try {
+    const rows = await client`
+      SELECT insert_capability_item_version(
+        ${crypto.randomUUID()}::uuid,
+        ${params.capabilityId}::uuid,
+        ${params.itemType}::varchar,
+        ${params.itemId}::uuid,
+        CURRENT_TIMESTAMP,
+        ${params.maintainedBy ?? null}::uuid
+      ) AS version_id
+    `;
+    return (rows[0] as any).version_id;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to assign item to capability");
+  }
+}
+
+/** Unassign an item from a capability (soft-delete) */
+export async function unassignItemFromCapability(linkId: string): Promise<void> {
+  try {
+    await client`SELECT delete_capability_item(${linkId}::uuid)`;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to unassign item from capability");
+  }
+}
+
+/** Update a capability (bitemporal versioning) */
+export async function updateCapability(params: {
+  id: string;
+  name?: string;
+  description?: string;
+  sdlc_phase?: SdlcPhase;
+  sort_order?: number;
+  status?: CapabilityStatus;
+  maintainedBy?: string;
+}): Promise<string> {
+  try {
+    const rows = await client`
+      SELECT update_capability_version(
+        ${params.id}::uuid,
+        ${params.name ?? null}::varchar,
+        ${params.description ?? null}::text,
+        ${params.sdlc_phase ?? null}::varchar,
+        ${params.sort_order ?? null}::int,
+        ${params.status ?? null}::varchar,
+        CURRENT_TIMESTAMP,
+        ${params.maintainedBy ?? null}::uuid
+      ) AS version_id
+    `;
+    return (rows[0] as any).version_id;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to update capability");
+  }
+}
+
+/** Get a map of item IDs to their capability IDs for bulk filtering */
+export async function getCapabilityItemsMap(
+  itemType: ItemType
+): Promise<Record<string, string[]>> {
+  try {
+    const rows = await client`
+      SELECT ci.item_id, ci.capability_id
+      FROM current_capability_items ci
+      WHERE ci.item_type = ${itemType}
+        AND ci.valid_to = 'infinity'
+    `;
+    const map: Record<string, string[]> = {};
+    for (const row of rows) {
+      const r = row as { item_id: string; capability_id: string };
+      if (!map[r.item_id]) map[r.item_id] = [];
+      map[r.item_id].push(r.capability_id);
+    }
+    return map;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to get capability items map");
   }
 }

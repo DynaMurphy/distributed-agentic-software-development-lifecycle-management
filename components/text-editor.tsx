@@ -48,6 +48,7 @@ type EditorProps = {
   isCurrentVersion: boolean;
   currentVersionIndex: number;
   editorMode?: EditorMode;
+  onNavigateDocument?: (docId: string, linkText: string) => void;
 };
 
 /**

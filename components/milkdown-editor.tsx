@@ -13,7 +13,7 @@ import {
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 
-import { mermaidFeature } from "@/lib/editor/mermaid-plugin";
+import { mermaidRenderPreview } from "@/lib/editor/mermaid-plugin";
 
 type MilkdownEditorProps = {
   content: string;
@@ -22,6 +22,7 @@ type MilkdownEditorProps = {
   isCurrentVersion: boolean;
   currentVersionIndex: number;
   readOnly?: boolean;
+  onNavigateDocument?: (docId: string, linkText: string) => void;
 };
 
 function useThrottle<T>(value: T, intervalMs: number): T {
@@ -51,6 +52,7 @@ function PureMilkdownEditor({
   status,
   isCurrentVersion,
   readOnly = false,
+  onNavigateDocument,
 }: MilkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const crepeRef = useRef<Crepe | null>(null);
@@ -182,10 +184,14 @@ function PureMilkdownEditor({
             text: "Start writing your document...",
             mode: "doc",
           },
+          [Crepe.Feature.CodeMirror]: {
+            renderPreview: mermaidRenderPreview,
+            previewOnlyByDefault: true,
+          },
         },
       });
 
-      instance.addFeature(mermaidFeature);
+      // mermaid rendering is handled via CodeMirror renderPreview config above
 
       instance.on((listener) => {
         listener.markdownUpdated((_ctx, markdown, _prevMarkdown) => {
@@ -291,6 +297,18 @@ function PureMilkdownEditor({
     <div
       ref={containerRef}
       className="milkdown-editor-wrapper prose prose-sm dark:prose-invert max-w-none"
+      onClick={(e) => {
+        const target = (e.target as Element).closest("a");
+        if (!target) return;
+        const href = target.getAttribute("href");
+        if (!href?.startsWith("splm://doc/")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const docId = href.replace("splm://doc/", "");
+        if (docId && onNavigateDocument) {
+          onNavigateDocument(docId, target.textContent ?? "Document");
+        }
+      }}
     />
   );
 }

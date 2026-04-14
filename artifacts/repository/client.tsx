@@ -334,6 +334,16 @@ function RepositoriesBrowserView() {
 
       {/* Filter bar */}
       <div className="flex items-center gap-1.5 border-b px-6 py-2">
+        {selectedRepositoryId && (
+          <button
+            type="button"
+            onClick={() => setSelectedRepositoryId("")}
+            className="rounded-full px-3 py-1 text-xs font-medium transition-colors bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1"
+          >
+            <XIcon className="size-3" />
+            Clear selection
+          </button>
+        )}
         {statusFilters.map((f) => (
           <button
             key={f.value}

@@ -18,6 +18,8 @@ export interface BitemporalDocument {
   valid_to: Date;
   maintained_by: string | null;
   maintained_by_email: string | null;
+  parent_id: string | null;
+  sort_order: number;
 }
 
 /**
@@ -28,6 +30,8 @@ export interface BitemporalDocumentSummary {
   version_id: string;
   title: string;
   valid_from: Date;
+  parent_id: string | null;
+  sort_order: number;
 }
 
 /**
@@ -40,7 +44,7 @@ export async function listBitemporalDocuments(filters?: {
 > {
   try {
     let query = `
-      SELECT DISTINCT ON (id) id, version_id, title, valid_from
+      SELECT DISTINCT ON (id) id, version_id, title, valid_from, parent_id, sort_order
       FROM current_documents
     `;
     if (filters?.repositoryId) {
@@ -66,7 +70,7 @@ export async function getBitemporalDocumentById(
   try {
     const rows = await client`
       SELECT d.id, d.version_id, d.title, d.content, d.valid_from, d.valid_to,
-             d.maintained_by, u.email AS maintained_by_email
+             d.maintained_by, u.email AS maintained_by_email, d.parent_id, d.sort_order
       FROM current_documents d
       LEFT JOIN "User" u ON d.maintained_by = u.id
       WHERE d.id = ${id}
@@ -93,7 +97,7 @@ export async function getBitemporalDocumentVersions(
   try {
     const rows = await client`
       SELECT d.id, d.version_id, d.title, d.content, d.valid_from, d.valid_to,
-             d.maintained_by, u.email AS maintained_by_email
+             d.maintained_by, u.email AS maintained_by_email, d.parent_id, d.sort_order
       FROM documents d
       LEFT JOIN "User" u ON d.maintained_by = u.id
       WHERE d.id = ${id}
@@ -166,7 +170,9 @@ export async function createBitemporalDocument(
   id: string,
   title: string,
   content: string,
-  maintainedBy?: string
+  maintainedBy?: string,
+  parentId?: string | null,
+  sortOrder?: number
 ): Promise<string> {
   try {
     const rows = await client`
@@ -175,7 +181,9 @@ export async function createBitemporalDocument(
         ${title}::varchar,
         ${content}::text,
         ${null}::timestamptz,
-        ${maintainedBy ?? null}::uuid
+        ${maintainedBy ?? null}::uuid,
+        ${parentId ?? null}::uuid,
+        ${sortOrder ?? 0}::integer
       ) AS version_id
     `;
     return rows[0].version_id as string;
@@ -183,6 +191,33 @@ export async function createBitemporalDocument(
     throw new ChatSDKError(
       "bad_request:database",
       "Failed to create bitemporal document"
+    );
+  }
+}
+
+/**
+ * Update document metadata (parent_id, sort_order, title) without changing content.
+ */
+export async function updateBitemporalDocumentMetadata(
+  id: string,
+  updates: { title?: string; parentId?: string | null; sortOrder?: number },
+  maintainedBy?: string
+): Promise<string> {
+  try {
+    const rows = await client`
+      SELECT update_document_metadata(
+        ${id}::uuid,
+        ${updates.title ?? null}::varchar,
+        ${updates.parentId ?? null}::uuid,
+        ${updates.sortOrder ?? null}::integer,
+        ${maintainedBy ?? null}::uuid
+      ) AS version_id
+    `;
+    return rows[0].version_id as string;
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to update bitemporal document metadata"
     );
   }
 }

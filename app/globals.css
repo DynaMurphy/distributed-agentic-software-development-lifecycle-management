@@ -205,26 +205,45 @@
   min-height: 600px;
 }
 
-/* Mermaid diagram preview below code blocks */
+/* Mermaid diagram styling (Streamdown + Milkdown) */
+.mermaid-diagram svg,
+.mermaid-preview svg {
+  width: 100%;
+  height: auto;
+  min-height: 200px;
+}
+
+.mermaid-diagram,
 .mermaid-preview {
-  display: flex;
-  justify-content: center;
-  border: 1px solid hsl(var(--border));
-  border-radius: 0.5rem;
+  display: block;
+  width: 100%;
   padding: 1rem;
   margin: 0.25rem 0 0.5rem;
-  background: hsl(var(--muted) / 0.3);
   overflow-x: auto;
 }
 
-.mermaid-preview svg {
-  max-width: 100%;
-  height: auto;
+/*
+ * Mermaid renders text inside <foreignObject> using plain HTML divs/spans.
+ * Tailwind's preflight and global resets can strip font-size, color, and
+ * overflow from these elements, making labels invisible. Override here.
+ * (Streamdown uses foreignObject; Milkdown uses htmlLabels: false for SVG text.)
+ */
+.mermaid-diagram foreignObject,
+.mermaid-diagram foreignObject * {
+  font-size: revert;
+  line-height: revert;
+  color: inherit;
+  overflow: visible;
 }
 
-.mermaid-empty {
-  color: hsl(var(--muted-foreground));
-  font-style: italic;
+.mermaid-diagram .nodeLabel,
+.mermaid-diagram .edgeLabel,
+.mermaid-diagram .label,
+.mermaid-preview .nodeLabel,
+.mermaid-preview .edgeLabel,
+.mermaid-preview .label {
+  color: var(--foreground, #1a1a2e);
+  font-family: inherit;
 }
 
 .mermaid-error {
