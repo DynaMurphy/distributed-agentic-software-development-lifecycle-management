@@ -49,7 +49,8 @@ export type ItemType = "feature" | "bug" | "task";
 export type LinkType = "specification" | "test_plan" | "design" | "reference";
 export type RepositoryStatus = "active" | "archived";
 export type CapabilityStatus = "active" | "archived";
-export type RoadmapHorizon = "now" | "next" | "later";
+export type RoadmapHorizon = "now" | "next" | "later" | null;
+export type MilestoneStatus = "planning" | "active" | "frozen" | "released" | "archived";
 export type SdlcPhase =
   | "strategy_planning"
   | "prioritization"

@@ -8,6 +8,7 @@ import {
   closestCorners,
   KeyboardSensor,
   PointerSensor,
+  useDroppable,
   useSensor,
   useSensors,
   type DragStartEvent,
@@ -33,6 +34,7 @@ import {
 import useSWR from "swr";
 import type { UIArtifact } from "@/components/artifact";
 import {
+  addDays,
   addMonths,
   addWeeks,
   differenceInDays,
@@ -129,6 +131,7 @@ const HORIZON_LABELS: Record<string, { title: string; description: string }> = {
   now: { title: "Now", description: "Current sprint / in-flight" },
   next: { title: "Next", description: "1–2 releases ahead" },
   later: { title: "Later", description: "Future / exploratory" },
+  unassigned: { title: "Unassigned", description: "Not yet planned" },
 };
 
 // =============================================================================
@@ -206,18 +209,181 @@ function TimelineControlBar({
   );
 }
 
+// Draggable timeline bar supporting move and edge-resize
+function DraggableTimelineBar({
+  item,
+  barColor,
+  leftPercent,
+  widthPercent,
+  totalDays,
+  timelineStart,
+  onItemClick,
+  onScheduleChange,
+}: {
+  item: RoadmapItemData;
+  barColor: string;
+  leftPercent: number;
+  widthPercent: number;
+  totalDays: number;
+  timelineStart: Date;
+  onItemClick?: (item: RoadmapItemData) => void;
+  onScheduleChange?: (itemId: string, plannedStart: string, plannedEnd: string) => void;
+}) {
+  const barRef = useRef<HTMLDivElement>(null);
+  const [dragState, setDragState] = useState<{
+    mode: "move" | "resize-end";
+    startX: number;
+    origLeftPct: number;
+    origWidthPct: number;
+  } | null>(null);
+  const [localLeft, setLocalLeft] = useState(leftPercent);
+  const [localWidth, setLocalWidth] = useState(widthPercent);
+  const didDragRef = useRef(false);
+
+  // Sync from props when not dragging
+  useEffect(() => {
+    if (!dragState) {
+      setLocalLeft(leftPercent);
+      setLocalWidth(widthPercent);
+    }
+  }, [leftPercent, widthPercent, dragState]);
+
+  const progress = getProgressPercent(item);
+
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent, mode: "move" | "resize-end") => {
+      e.preventDefault();
+      e.stopPropagation();
+      didDragRef.current = false;
+      setDragState({
+        mode,
+        startX: e.clientX,
+        origLeftPct: localLeft,
+        origWidthPct: localWidth,
+      });
+    },
+    [localLeft, localWidth],
+  );
+
+  useEffect(() => {
+    if (!dragState) return;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const container = barRef.current?.parentElement;
+      if (!container) return;
+      const containerWidth = container.getBoundingClientRect().width;
+      const dx = e.clientX - dragState.startX;
+      const deltaPct = (dx / containerWidth) * 100;
+
+      if (Math.abs(dx) > 3) didDragRef.current = true;
+
+      if (dragState.mode === "move") {
+        setLocalLeft(Math.max(0, dragState.origLeftPct + deltaPct));
+      } else {
+        setLocalWidth(Math.max(2, dragState.origWidthPct + deltaPct));
+      }
+    };
+
+    const onMouseUp = () => {
+      if (!didDragRef.current || !item.planned_start || !item.planned_end) {
+        setDragState(null);
+        return;
+      }
+
+      const origStart = parseISO(item.planned_start);
+      const origEnd = parseISO(item.planned_end);
+
+      if (dragState.mode === "move") {
+        const dayShift = Math.round(((localLeft - dragState.origLeftPct) / 100) * totalDays);
+        const newStart = addDays(origStart, dayShift);
+        const newEnd = addDays(origEnd, dayShift);
+        onScheduleChange?.(item.id, format(newStart, "yyyy-MM-dd"), format(newEnd, "yyyy-MM-dd"));
+      } else {
+        const dayShift = Math.round(((localWidth - dragState.origWidthPct) / 100) * totalDays);
+        const newEnd = addDays(origEnd, dayShift);
+        if (!isBefore(newEnd, origStart)) {
+          onScheduleChange?.(item.id, format(origStart, "yyyy-MM-dd"), format(newEnd, "yyyy-MM-dd"));
+        }
+      }
+
+      setDragState(null);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [dragState, localLeft, localWidth, totalDays, item, onScheduleChange]);
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            ref={barRef}
+            className={`absolute top-1 h-5 rounded-sm ${barColor} ${
+              dragState ? "opacity-100 ring-2 ring-primary shadow-lg" : "opacity-80 hover:opacity-100"
+            } transition-opacity cursor-grab active:cursor-grabbing flex items-center px-1.5 overflow-hidden select-none`}
+            style={{
+              left: `${localLeft}%`,
+              width: `${localWidth}%`,
+              minWidth: "24px",
+            }}
+            onMouseDown={(e) => onMouseDown(e, "move")}
+            onClick={(e) => {
+              if (!didDragRef.current) onItemClick?.(item);
+            }}
+          >
+            {progress !== null && (
+              <div
+                className="absolute inset-0 bg-white/20 dark:bg-black/20"
+                style={{ width: `${progress}%` }}
+              />
+            )}
+            <span className="relative text-[10px] font-medium text-white dark:text-white truncate drop-shadow-sm">
+              {progress !== null ? `${progress}%` : ""}
+            </span>
+            {/* Resize handle on right edge */}
+            <div
+              className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/30"
+              onMouseDown={(e) => onMouseDown(e, "resize-end")}
+            />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>
+          <div className="text-xs space-y-0.5">
+            <div className="font-medium">{item.title}</div>
+            {item.planned_start && item.planned_end && (
+              <div>{format(parseISO(item.planned_start), "MMM d")} → {format(parseISO(item.planned_end), "MMM d, yyyy")}</div>
+            )}
+            <div className="capitalize">Status: {item.status.replace("_", " ")}</div>
+            <div className="capitalize">Priority: {item.priority}</div>
+            {progress !== null && <div>Progress: {progress}%</div>}
+            {item.capability_name && <div>Capability: {item.capability_name}</div>}
+            <div className="text-muted-foreground mt-0.5">Drag to move • Drag right edge to resize</div>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 function TimelineView({
   items,
   zoom,
   colorBy,
   capabilityColorMap,
   onItemClick,
+  onScheduleChange,
 }: {
   items: RoadmapItemData[];
   zoom: ZoomLevel;
   colorBy: ColorBy;
   capabilityColorMap: Map<string, string>;
   onItemClick?: (item: RoadmapItemData) => void;
+  onScheduleChange?: (itemId: string, plannedStart: string, plannedEnd: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -353,7 +519,6 @@ function TimelineView({
                 </div>
               )}
               {group.items.map((item) => {
-                const progress = getProgressPercent(item);
                 const barColor = getColorForItem(item, colorBy, capabilityColorMap);
                 let leftPercent = 0;
                 let widthPercent = 5;
@@ -382,41 +547,16 @@ function TimelineView({
                     </div>
                     <div className="flex-1 relative py-1">
                       {item.planned_start && item.planned_end ? (
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div
-                                className={`absolute top-1 h-5 rounded-sm ${barColor} opacity-80 hover:opacity-100 transition-opacity cursor-pointer flex items-center px-1.5 overflow-hidden`}
-                                style={{
-                                  left: `${leftPercent}%`,
-                                  width: `${widthPercent}%`,
-                                  minWidth: "24px",
-                                }}
-                                onClick={() => onItemClick?.(item)}
-                              >
-                                {progress !== null && (
-                                  <div
-                                    className="absolute inset-0 bg-white/20 dark:bg-black/20"
-                                    style={{ width: `${progress}%` }}
-                                  />
-                                )}
-                                <span className="relative text-[10px] font-medium text-white dark:text-white truncate drop-shadow-sm">
-                                  {progress !== null ? `${progress}%` : ""}
-                                </span>
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <div className="text-xs space-y-0.5">
-                                <div className="font-medium">{item.title}</div>
-                                <div>{format(parseISO(item.planned_start), "MMM d")} → {format(parseISO(item.planned_end), "MMM d, yyyy")}</div>
-                                <div className="capitalize">Status: {item.status.replace("_", " ")}</div>
-                                <div className="capitalize">Priority: {item.priority}</div>
-                                {progress !== null && <div>Progress: {progress}%</div>}
-                                {item.capability_name && <div>Capability: {item.capability_name}</div>}
-                              </div>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
+                        <DraggableTimelineBar
+                          item={item}
+                          barColor={barColor}
+                          leftPercent={leftPercent}
+                          widthPercent={widthPercent}
+                          totalDays={totalDays}
+                          timelineStart={timelineStart}
+                          onItemClick={onItemClick}
+                          onScheduleChange={onScheduleChange}
+                        />
                       ) : (
                         <div className="px-2 py-0.5 text-xs text-muted-foreground/50 italic">
                           Unscheduled
@@ -475,10 +615,8 @@ function KanbanCard({
   const isAtRisk = item.status === "blocked" || (progress !== null && progress < 30 && item.status === "implementation");
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full text-left p-3 rounded-lg border transition-all hover:shadow-md cursor-pointer ${
+    <div
+      className={`w-full text-left p-3 rounded-lg border transition-all hover:shadow-md ${
         isAtRisk
           ? "border-red-300 dark:border-red-700 bg-red-50/50 dark:bg-red-950/20"
           : "border-border bg-card hover:bg-accent/50"
@@ -525,7 +663,43 @@ function KanbanCard({
           <span>⚠️</span> At Risk
         </div>
       )}
-    </button>
+    </div>
+  );
+}
+
+function SortableKanbanCard({
+  item,
+  onClick,
+}: {
+  item: RoadmapItemData;
+  onClick?: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id, data: { type: "card", item } });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ ...style, touchAction: "none" }}
+      {...attributes}
+      {...listeners}
+      onClick={() => { if (!isDragging) onClick?.(); }}
+      className="cursor-grab active:cursor-grabbing"
+    >
+      <KanbanCard item={item} />
+    </div>
   );
 }
 
@@ -538,15 +712,15 @@ function KanbanLane({
   items: RoadmapItemData[];
   onItemClick?: (item: RoadmapItemData) => void;
 }) {
-  const { setNodeRef } = useSortable({ id: horizon });
+  const { setNodeRef, isOver } = useDroppable({ id: `lane-${horizon}` });
   const info = HORIZON_LABELS[horizon] ?? { title: horizon, description: "" };
-
-  const totalEffort = items.length;
 
   return (
     <div
       ref={setNodeRef}
-      className="flex-1 min-w-64 flex flex-col bg-muted/20 rounded-lg border border-border overflow-hidden"
+      className={`flex-1 min-w-64 flex flex-col rounded-lg border border-border overflow-hidden transition-colors ${
+        isOver ? "bg-primary/5 border-primary/30" : "bg-muted/20"
+      }`}
     >
       <div className="px-3 py-2 border-b border-border bg-muted/30">
         <div className="flex items-center justify-between">
@@ -559,21 +733,23 @@ function KanbanLane({
           </div>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
-        {items.length === 0 ? (
-          <div className="text-xs text-muted-foreground/50 text-center py-8 italic">
-            Drag features here to plan for {info.title.toLowerCase()}
-          </div>
-        ) : (
-          items.map((item) => (
-            <KanbanCard
-              key={item.id}
-              item={item}
-              onClick={() => onItemClick?.(item)}
-            />
-          ))
-        )}
-      </div>
+      <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+        <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[80px]">
+          {items.length === 0 ? (
+            <div className="text-xs text-muted-foreground/50 text-center py-8 italic">
+              Drag features here to plan for {info.title.toLowerCase()}
+            </div>
+          ) : (
+            items.map((item) => (
+              <SortableKanbanCard
+                key={item.id}
+                item={item}
+                onClick={() => onItemClick?.(item)}
+              />
+            ))
+          )}
+        </div>
+      </SortableContext>
     </div>
   );
 }
@@ -624,12 +800,28 @@ function KanbanView({
     if (!over) return;
 
     const itemId = active.id as string;
-    const targetLane = over.id as string;
+    const overId = over.id as string;
 
-    if (["now", "next", "later"].includes(targetLane)) {
+    // Resolve target lane from drop target
+    let targetHorizon: string | null = null;
+    if (overId.startsWith("lane-")) {
+      targetHorizon = overId.replace("lane-", "");
+    } else {
+      // Dropped on another card — find which lane it belongs to
+      for (const [horizon, laneItems] of Object.entries(lanes)) {
+        if (laneItems.some((i) => i.id === overId)) {
+          targetHorizon = horizon;
+          break;
+        }
+      }
+    }
+
+    if (targetHorizon && ["now", "next", "later", "unassigned"].includes(targetHorizon)) {
       const item = items.find((i) => i.id === itemId);
-      if (item && item.roadmap_horizon !== targetLane) {
-        onHorizonChange?.(itemId, targetLane);
+      const currentHorizon = item?.roadmap_horizon ?? "unassigned";
+      if (currentHorizon !== targetHorizon) {
+        // Use null for "unassigned" to clear the horizon
+        onHorizonChange?.(itemId, targetHorizon === "unassigned" ? "" : targetHorizon);
       }
     }
   }
@@ -642,44 +834,18 @@ function KanbanView({
       onDragEnd={handleDragEnd}
     >
       <div className="flex gap-3 p-3 h-full overflow-x-auto">
-        <SortableContext items={["now", "next", "later"]} strategy={verticalListSortingStrategy}>
-          <KanbanLane horizon="now" items={lanes.now} onItemClick={onItemClick} />
-          <KanbanLane horizon="next" items={lanes.next} onItemClick={onItemClick} />
-          <KanbanLane horizon="later" items={lanes.later} onItemClick={onItemClick} />
-        </SortableContext>
+        <KanbanLane horizon="now" items={lanes.now} onItemClick={onItemClick} />
+        <KanbanLane horizon="next" items={lanes.next} onItemClick={onItemClick} />
+        <KanbanLane horizon="later" items={lanes.later} onItemClick={onItemClick} />
+        <KanbanLane horizon="unassigned" items={lanes.unassigned} onItemClick={onItemClick} />
       </div>
       <DragOverlay>
         {activeItem ? (
-          <div className="opacity-80">
+          <div className="opacity-90 w-64">
             <KanbanCard item={activeItem} />
           </div>
         ) : null}
       </DragOverlay>
-
-      {/* Unassigned items */}
-      {lanes.unassigned.length > 0 && (
-        <div className="border-t border-border px-4 py-2 bg-muted/10">
-          <div className="text-xs font-medium text-muted-foreground mb-1.5">
-            Unassigned to horizon ({lanes.unassigned.length})
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {lanes.unassigned.slice(0, 12).map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                onClick={() => onItemClick?.(item)}
-                className="text-xs px-2 py-1 rounded-md border border-border bg-card hover:bg-accent/50 truncate max-w-48"
-                title={item.title}
-              >
-                {item.title}
-              </button>
-            ))}
-            {lanes.unassigned.length > 12 && (
-              <span className="text-xs text-muted-foreground self-center">+{lanes.unassigned.length - 12} more</span>
-            )}
-          </div>
-        </div>
-      )}
     </DndContext>
   );
 }
@@ -866,10 +1032,11 @@ function RoadmapContent({ content }: { content: string }) {
 
   // Handle horizon change from kanban drag-and-drop
   const handleHorizonChange = useCallback(async (itemId: string, horizon: string) => {
+    const newHorizon = horizon === "" ? null : horizon;
     // Optimistic update
     setAllItems((prev) =>
       prev.map((item) =>
-        item.id === itemId ? { ...item, roadmap_horizon: horizon as any } : item
+        item.id === itemId ? { ...item, roadmap_horizon: newHorizon as any } : item
       )
     );
 
@@ -877,13 +1044,44 @@ function RoadmapContent({ content }: { content: string }) {
       const res = await fetch("/api/roadmap", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: itemId, roadmapHorizon: horizon }),
+        body: JSON.stringify({ id: itemId, roadmapHorizon: newHorizon }),
       });
       if (!res.ok) throw new Error("Failed to update");
-      toast.success("Horizon updated");
+      toast.success(newHorizon ? `Moved to ${newHorizon}` : "Removed from horizon");
     } catch {
       // Revert
       toast.error("Failed to update horizon");
+      const repoParam = selectedRepositoryId
+        ? `?repositoryId=${selectedRepositoryId}`
+        : "";
+      fetch(`/api/roadmap${repoParam}`)
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data) => {
+          if (Array.isArray(data)) setAllItems(data);
+        })
+        .catch(() => {});
+    }
+  }, [selectedRepositoryId]);
+
+  // Handle schedule change from timeline drag
+  const handleScheduleChange = useCallback(async (itemId: string, plannedStart: string, plannedEnd: string) => {
+    // Optimistic update
+    setAllItems((prev) =>
+      prev.map((item) =>
+        item.id === itemId ? { ...item, planned_start: plannedStart, planned_end: plannedEnd } : item
+      )
+    );
+
+    try {
+      const res = await fetch("/api/roadmap", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: itemId, plannedStart, plannedEnd }),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      toast.success("Schedule updated");
+    } catch {
+      toast.error("Failed to update schedule");
       const repoParam = selectedRepositoryId
         ? `?repositoryId=${selectedRepositoryId}`
         : "";
@@ -966,6 +1164,7 @@ function RoadmapContent({ content }: { content: string }) {
             colorBy={colorBy}
             capabilityColorMap={capabilityColorMap}
             onItemClick={handleItemClick}
+            onScheduleChange={handleScheduleChange}
           />
         ) : (
           <KanbanView
