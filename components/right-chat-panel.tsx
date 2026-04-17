@@ -4,6 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { isToday, isYesterday, subMonths, subWeeks } from "date-fns";
 import {
   Check,
+  Eye,
   History,
   MessageSquare,
   MoreHorizontal,
@@ -24,6 +25,8 @@ import type { Vote } from "@/lib/db/schema";
 import type { Chat } from "@/lib/db/schema";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { fetcher } from "@/lib/utils";
+import { useContextMarkers } from "@/hooks/use-context-markers";
+import { useArtifactStack } from "@/hooks/use-artifact";
 import { ArtifactMessages } from "./artifact-messages";
 import type { SwitchChatFn } from "./chat";
 import { LoaderIcon } from "./icons";
@@ -531,6 +534,49 @@ export function RightChatPanel({
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<PanelTab>("active");
+  const [hasUnread, setHasUnread] = useState(false);
+
+  // Context-change markers
+  const { addMarker, getMarkersAfter, clearMarkers } = useContextMarkers();
+  const { current: currentArtifact } = useArtifactStack();
+  const prevArtifactRef = useRef<string | null>(null);
+
+  // Track artifact navigation and insert context markers
+  useEffect(() => {
+    const currentDocId = currentArtifact?.documentId ?? null;
+    const prevDocId = prevArtifactRef.current;
+
+    if (currentDocId !== prevDocId) {
+      prevArtifactRef.current = currentDocId;
+
+      // Only add marker if there are messages to anchor to
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage) {
+        addMarker(
+          lastMessage.id,
+          currentArtifact?.title ?? null
+        );
+      }
+    }
+  }, [currentArtifact?.documentId, currentArtifact?.title, messages, addMarker]);
+
+  // Notification badge: track new AI messages while collapsed
+  const prevMessageCountRef = useRef(messages.length);
+  useEffect(() => {
+    if (isCollapsed && !fullWidth) {
+      // Check if new messages arrived while collapsed
+      if (messages.length > prevMessageCountRef.current) {
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg?.role === "assistant") {
+          setHasUnread(true);
+        }
+      }
+    } else {
+      // Clear badge when expanded
+      setHasUnread(false);
+    }
+    prevMessageCountRef.current = messages.length;
+  }, [messages.length, messages, isCollapsed, fullWidth]);
 
   // Restore collapse state and tab from session storage on mount
   useEffect(() => {
@@ -546,6 +592,7 @@ export function RightChatPanel({
   const toggleCollapsed = () => {
     const next = !isCollapsed;
     setIsCollapsed(next);
+    if (!next) setHasUnread(false); // Clear badge when expanding
     if (typeof window !== "undefined") {
       sessionStorage.setItem(SESSION_KEY, String(next));
     }
@@ -575,10 +622,13 @@ export function RightChatPanel({
       <button
         type="button"
         onClick={() => { toggleCollapsed(); switchTab("active"); }}
-        className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted-foreground/10 transition-colors"
+        className="relative flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted-foreground/10 transition-colors"
         aria-label="Show active chat"
       >
         <MessageSquare className="h-4.5 w-4.5 text-muted-foreground" />
+        {hasUnread && (
+          <span className="absolute top-0.5 right-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background" />
+        )}
       </button>
       <button
         type="button"
@@ -682,6 +732,7 @@ export function RightChatPanel({
             artifactStatus={artifactStatus}
             chatId={chatId}
             className={fullWidth ? "mx-auto w-full md:px-16 lg:px-64" : undefined}
+            getMarkersAfter={getMarkersAfter}
             isReadonly={isReadonly}
             messages={messages}
             regenerate={regenerate}
@@ -692,9 +743,19 @@ export function RightChatPanel({
 
           {!isReadonly && (
             <div className={fullWidth
-              ? "relative mx-auto flex w-full flex-row items-end gap-2 px-4 pb-4 pt-2 md:px-16 lg:px-64"
-              : "relative flex w-full flex-row items-end gap-2 px-4 pb-4 pt-2"
+              ? "relative mx-auto flex w-full flex-col gap-0 px-4 pb-4 pt-2 md:px-16 lg:px-64"
+              : "relative flex w-full flex-col gap-0 px-4 pb-4 pt-2"
             }>
+              {/* Context indicator chip */}
+              {currentArtifact && (
+                <div className="flex items-center justify-center pb-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-3 py-1 text-[11px] font-medium text-muted-foreground">
+                    <Eye className="h-3 w-3" />
+                    Viewing: {currentArtifact.title}
+                  </span>
+                </div>
+              )}
+              <div className="flex flex-row items-end gap-2">
               <MultimodalInput
                 attachments={attachments}
                 chatId={chatId}
@@ -710,6 +771,7 @@ export function RightChatPanel({
                 status={status}
                 stop={stop}
               />
+              </div>
             </div>
           )}
         </>

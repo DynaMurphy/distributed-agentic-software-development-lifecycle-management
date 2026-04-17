@@ -1,8 +1,10 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import equal from "fast-deep-equal";
 import { AnimatePresence, motion } from "framer-motion";
+import { Eye, X as XIcon } from "lucide-react";
 import { memo } from "react";
 import { useMessages } from "@/hooks/use-messages";
+import type { ContextMarker } from "@/hooks/use-context-markers";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import type { UIArtifact } from "./artifact";
@@ -19,6 +21,8 @@ type ArtifactMessagesProps = {
   isReadonly: boolean;
   artifactStatus: UIArtifact["status"];
   className?: string;
+  /** Context-change markers to render between messages */
+  getMarkersAfter?: (messageId: string) => ContextMarker[];
 };
 
 function PureArtifactMessages({
@@ -31,6 +35,7 @@ function PureArtifactMessages({
   regenerate,
   isReadonly,
   className,
+  getMarkersAfter,
 }: ArtifactMessagesProps) {
   const {
     containerRef: messagesContainerRef,
@@ -48,24 +53,39 @@ function PureArtifactMessages({
       ref={messagesContainerRef}
     >
       {messages.map((message, index) => (
-        <PreviewMessage
-          addToolApprovalResponse={addToolApprovalResponse}
-          chatId={chatId}
-          isLoading={status === "streaming" && index === messages.length - 1}
-          isReadonly={isReadonly}
-          key={message.id}
-          message={message}
-          regenerate={regenerate}
-          requiresScrollPadding={
-            hasSentMessage && index === messages.length - 1
-          }
-          setMessages={setMessages}
-          vote={
-            votes
-              ? votes.find((vote) => vote.messageId === message.id)
-              : undefined
-          }
-        />
+        <div key={message.id} className="w-full">
+          <PreviewMessage
+            addToolApprovalResponse={addToolApprovalResponse}
+            chatId={chatId}
+            isLoading={status === "streaming" && index === messages.length - 1}
+            isReadonly={isReadonly}
+            message={message}
+            regenerate={regenerate}
+            requiresScrollPadding={
+              hasSentMessage && index === messages.length - 1
+            }
+            setMessages={setMessages}
+            vote={
+              votes
+                ? votes.find((vote) => vote.messageId === message.id)
+                : undefined
+            }
+          />
+          {/* Context-change markers after this message */}
+          {getMarkersAfter?.(message.id)?.map((marker) => (
+            <div
+              key={marker.timestamp}
+              className="my-4 flex items-center gap-3 px-2"
+            >
+              <div className="h-px flex-1 bg-border" />
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground/60">
+                <Eye className="h-3 w-3" />
+                {marker.title ? `now viewing: ${marker.title}` : "artifact closed"}
+              </span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+          ))}
+        </div>
       ))}
 
       <AnimatePresence mode="wait">
