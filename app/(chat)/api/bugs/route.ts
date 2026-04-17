@@ -30,8 +30,9 @@ export async function GET(request: Request) {
     const priority = searchParams.get("priority") as any;
     const severity = searchParams.get("severity") as any;
     const repositoryId = searchParams.get("repositoryId") ?? undefined;
+    const productId = searchParams.get("productId") ?? undefined;
 
-    const bugs = await listBugs({ status, priority, severity, repositoryId });
+    const bugs = await listBugs({ status, priority, severity, repositoryId, productId });
     return Response.json(bugs, { status: 200 });
   }
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
+import { useSelectedRepository } from "@/hooks/use-selected-repository";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -542,8 +543,12 @@ function CapabilitiesBrowserView({
   setMetadata: React.Dispatch<React.SetStateAction<CapabilityArtifactMetadata>>;
 }) {
   const { setArtifact } = useArtifact();
+  const { selectedRepositoryId } = useSelectedRepository();
+  const repoParam = selectedRepositoryId
+    ? `?productId=${selectedRepositoryId}`
+    : "";
   const { data: capabilities, isLoading } = useSWR<CapabilitySummary[]>(
-    "/api/capabilities",
+    `/api/capabilities${repoParam}`,
     fetcher,
     { revalidateOnFocus: false },
   );

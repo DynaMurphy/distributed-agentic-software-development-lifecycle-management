@@ -2,8 +2,9 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import { AnimatePresence, motion } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { ChatHeader } from "@/components/chat-header";
@@ -20,6 +21,7 @@ import {
 import { useArtifactSelector } from "@/hooks/use-artifact";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { Vote } from "@/lib/db/schema";
 import { ChatSDKError } from "@/lib/errors";
 import type { Attachment, ChatMessage } from "@/lib/types";
@@ -28,9 +30,12 @@ import { Artifact } from "./artifact";
 import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
+import { RightChatPanel } from "./right-chat-panel";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import { toast } from "./toast";
 import type { VisibilityType } from "./visibility-selector";
+
+export type SwitchChatFn = (chatId: string | null, query?: string) => Promise<void>;
 
 export function Chat({
   id,
@@ -47,6 +52,109 @@ export function Chat({
   isReadonly: boolean;
   autoResume: boolean;
 }) {
+  const [activeChatId, setActiveChatId] = useState(id);
+  const [activeMessages, setActiveMessages] = useState(initialMessages);
+  const [activeVisibility, setActiveVisibility] = useState(initialVisibilityType);
+  const [activeReadonly, setActiveReadonly] = useState(isReadonly);
+  const [activeAutoResume, setActiveAutoResume] = useState(autoResume);
+  const [activeQuery, setActiveQuery] = useState<string | undefined>(undefined);
+  const [isSwitching, setIsSwitching] = useState(false);
+
+  const switchChat: SwitchChatFn = useCallback(async (chatId: string | null, query?: string) => {
+    setIsSwitching(true);
+
+    if (chatId) {
+      try {
+        const res = await fetch(`/api/messages?chatId=${encodeURIComponent(chatId)}`);
+        if (!res.ok) throw new Error("Failed to load chat");
+        const data = await res.json();
+        setActiveMessages(data.messages);
+        setActiveVisibility(data.visibility);
+        setActiveReadonly(data.isReadonly);
+        setActiveAutoResume(false);
+        setActiveQuery(undefined);
+        setActiveChatId(chatId);
+        window.history.pushState({}, "", `/chat/${chatId}`);
+      } catch {
+        toast({ type: "error", description: "Failed to load chat" });
+        setIsSwitching(false);
+        return;
+      }
+    } else {
+      const newId = generateUUID();
+      setActiveMessages([]);
+      setActiveVisibility("private");
+      setActiveReadonly(false);
+      setActiveAutoResume(false);
+      setActiveQuery(query || undefined);
+      setActiveChatId(newId);
+      window.history.pushState({}, "", "/");
+    }
+
+    requestAnimationFrame(() => setIsSwitching(false));
+  }, []);
+
+  // Handle browser back/forward
+  useEffect(() => {
+    const handlePopState = () => {
+      const match = window.location.pathname.match(/^\/chat\/(.+)$/);
+      if (match) {
+        switchChat(match[1]);
+      } else {
+        switchChat(null);
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [switchChat]);
+
+  return (
+    <div className="h-full">
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={activeChatId}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="h-full"
+        >
+          <ChatInner
+            id={activeChatId}
+            initialMessages={activeMessages}
+            initialChatModel={initialChatModel}
+            initialVisibilityType={activeVisibility}
+            isReadonly={activeReadonly}
+            autoResume={activeAutoResume}
+            initialQuery={activeQuery}
+            switchChat={switchChat}
+          />
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function ChatInner({
+  id,
+  initialMessages,
+  initialChatModel,
+  initialVisibilityType,
+  isReadonly,
+  autoResume,
+  initialQuery,
+  switchChat,
+}: {
+  id: string;
+  initialMessages: ChatMessage[];
+  initialChatModel: string;
+  initialVisibilityType: VisibilityType;
+  isReadonly: boolean;
+  autoResume: boolean;
+  initialQuery?: string;
+  switchChat: SwitchChatFn;
+}) {
   const router = useRouter();
 
   const { visibilityType } = useChatVisibility({
@@ -56,16 +164,6 @@ export function Chat({
 
   const { mutate } = useSWRConfig();
 
-  // Handle browser back/forward navigation
-  useEffect(() => {
-    const handlePopState = () => {
-      // When user navigates back/forward, refresh to sync with URL
-      router.refresh();
-    };
-
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [router]);
   const { setDataStream } = useDataStream();
 
   const [input, setInput] = useState<string>("");
@@ -155,8 +253,22 @@ export function Chat({
     },
   });
 
+  // When the chat id changes (client-side switch), populate the new chat's
+  // message store and reset transient state so the component reflects the
+  // newly-selected conversation without remounting.
+  const prevIdRef = useRef(id);
+  useEffect(() => {
+    if (prevIdRef.current !== id) {
+      setMessages(initialMessages);
+      setInput("");
+      setAttachments([]);
+      setHasAppendedQuery(false);
+      prevIdRef.current = id;
+    }
+  }, [id, initialMessages, setMessages]);
+
   const searchParams = useSearchParams();
-  const query = searchParams.get("query");
+  const query = initialQuery || searchParams.get("query");
 
   const [hasAppendedQuery, setHasAppendedQuery] = useState(false);
 
@@ -179,6 +291,24 @@ export function Chat({
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
+  const isMobile = useIsMobile();
+
+  const [rightPanelWidth, setRightPanelWidth] = useState(360);
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem("right-panel-width");
+    if (saved) {
+      const parsed = Number.parseInt(saved, 10);
+      if (!Number.isNaN(parsed) && parsed > 0) setRightPanelWidth(parsed);
+    }
+  }, []);
+
+  const handleRightPanelWidthChange = useCallback((width: number) => {
+    setRightPanelWidth(width);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("right-panel-width", String(width));
+    }
+  }, []);
 
   useAutoResume({
     autoResume: autoResume && !isCopilotModel,
@@ -189,34 +319,33 @@ export function Chat({
 
   return (
     <>
-      <div className="overscroll-behavior-contain flex h-dvh min-w-0 touch-pan-y flex-col bg-background">
-        <ChatHeader
-          chatId={id}
-          isReadonly={isReadonly}
-          selectedVisibilityType={initialVisibilityType}
-        />
+      <div className="flex h-dvh min-w-0 flex-row overflow-hidden">
+        {!isMobile ? (
+          <>
+            <Artifact
+              chatId={id}
+              isReadonly={isReadonly}
+              messages={messages}
+              sendMessage={sendMessage}
+              setMessages={setMessages}
+              status={status}
+              stop={stop}
+            />
 
-        <Messages
-          addToolApprovalResponse={addToolApprovalResponse}
-          chatId={id}
-          isArtifactVisible={isArtifactVisible}
-          isReadonly={isReadonly}
-          messages={messages}
-          regenerate={regenerate}
-          selectedModelId={initialChatModel}
-          setMessages={setMessages}
-          status={status}
-          votes={votes}
-        />
-
-        <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
-          {!isReadonly && (
-            <MultimodalInput
+            <RightChatPanel
+              addToolApprovalResponse={addToolApprovalResponse}
+              artifactStatus="idle"
               attachments={attachments}
               chatId={id}
+              fullWidth={!isArtifactVisible}
               input={input}
+              isCurrentVersion={true}
+              isReadonly={isReadonly}
               messages={messages}
-              onModelChange={setCurrentModelId}
+              onPanelWidthChange={handleRightPanelWidthChange}
+              onSwitchChat={switchChat}
+              panelWidth={rightPanelWidth}
+              regenerate={regenerate}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}
               sendMessage={sendMessage}
@@ -225,29 +354,64 @@ export function Chat({
               setMessages={setMessages}
               status={status}
               stop={stop}
+              votes={votes}
             />
-          )}
-        </div>
-      </div>
+          </>
+        ) : (
+          <>
+            <div className="overscroll-behavior-contain flex min-w-0 flex-1 touch-pan-y flex-col bg-background">
+              <ChatHeader
+                chatId={id}
+                isReadonly={isReadonly}
+                selectedVisibilityType={initialVisibilityType}
+              />
 
-      <Artifact
-        addToolApprovalResponse={addToolApprovalResponse}
-        attachments={attachments}
-        chatId={id}
-        input={input}
-        isReadonly={isReadonly}
-        messages={messages}
-        regenerate={regenerate}
-        selectedModelId={currentModelId}
-        selectedVisibilityType={visibilityType}
-        sendMessage={sendMessage}
-        setAttachments={setAttachments}
-        setInput={setInput}
-        setMessages={setMessages}
-        status={status}
-        stop={stop}
-        votes={votes}
-      />
+              <Messages
+                addToolApprovalResponse={addToolApprovalResponse}
+                chatId={id}
+                isArtifactVisible={isArtifactVisible}
+                isReadonly={isReadonly}
+                messages={messages}
+                regenerate={regenerate}
+                selectedModelId={initialChatModel}
+                setMessages={setMessages}
+                status={status}
+                votes={votes}
+              />
+
+              <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pt-2 pb-3 md:px-4 md:pb-4">
+                {!isReadonly && (
+                  <MultimodalInput
+                    attachments={attachments}
+                    chatId={id}
+                    input={input}
+                    messages={messages}
+                    onModelChange={setCurrentModelId}
+                    selectedModelId={currentModelId}
+                    selectedVisibilityType={visibilityType}
+                    sendMessage={sendMessage}
+                    setAttachments={setAttachments}
+                    setInput={setInput}
+                    setMessages={setMessages}
+                    status={status}
+                    stop={stop}
+                  />
+                )}
+              </div>
+            </div>
+
+            <Artifact
+              chatId={id}
+              isReadonly={isReadonly}
+              messages={messages}
+              sendMessage={sendMessage}
+              setMessages={setMessages}
+              status={status}
+              stop={stop}
+            />
+          </>
+        )}
+      </div>
 
       <AlertDialog
         onOpenChange={setShowCreditCardAlert}

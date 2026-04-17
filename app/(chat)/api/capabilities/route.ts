@@ -39,9 +39,13 @@ export async function GET(request: Request) {
   if (!id) {
     const status = searchParams.get("status") as CapabilityStatus | null;
     const sdlc_phase = searchParams.get("sdlc_phase") as SdlcPhase | null;
+    const repositoryId = searchParams.get("repositoryId") ?? undefined;
+    const productId = searchParams.get("productId") ?? undefined;
     const caps = await listCapabilities({
       status: status ?? undefined,
       sdlc_phase: sdlc_phase ?? undefined,
+      repositoryId,
+      productId,
     });
     return Response.json(caps, { status: 200 });
   }

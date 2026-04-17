@@ -81,7 +81,8 @@ export function DocumentPreview({
   }
 
   if (isDocumentsFetching) {
-    return <LoadingSkeleton artifactKind={result.kind ?? args.kind} />;
+  //  return <LoadingSkeleton artifactKind={result.kind ?? args.kind} />;
+    return null; 
   }
 
   const document: Document | null = previewDocument
@@ -98,8 +99,8 @@ export function DocumentPreview({
       : null;
 
   if (!document) {
-    return <LoadingSkeleton artifactKind={artifact.kind} />;
-  }
+  //  return <LoadingSkeleton artifactKind={artifact.kind} />;
+    return null;}
 
   return (
     <div className="relative w-full max-w-[450px] cursor-pointer">

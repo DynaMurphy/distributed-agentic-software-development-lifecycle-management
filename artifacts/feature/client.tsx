@@ -228,7 +228,7 @@ function FeatureDetailView({
   editorMode?: "wysiwyg" | "markdown";
 }) {
   return (
-    <div className="flex flex-col gap-6 p-6 overflow-y-auto max-h-full">
+    <div className="flex flex-col gap-6 p-6 overflow-y-auto max-h-full min-w-0">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
@@ -484,7 +484,7 @@ function FeaturesBrowserView({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const repoParam = selectedRepositoryId
-    ? `?repositoryId=${selectedRepositoryId}`
+    ? `?productId=${selectedRepositoryId}`
     : "";
   const { data: features, isLoading } = useSWR<FeatureSummary[]>(
     `/api/features${repoParam}`,

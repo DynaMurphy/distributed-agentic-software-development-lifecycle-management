@@ -55,6 +55,8 @@ export type LinkType = "specification" | "test_plan" | "design" | "reference";
 export type RepositoryStatus = "active" | "archived";
 export type CapabilityStatus = "active" | "archived";
 export type SdlcPhase = "strategy_planning" | "prioritization" | "specification" | "implementation" | "verification" | "delivery" | "post_delivery" | "platform";
+export type MilestoneStatus = "planning" | "active" | "frozen" | "released" | "archived";
+export type ReleaseType = "major" | "minor";
 
 export const DEFAULT_REPOSITORY_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -595,6 +597,7 @@ export async function createCapability(params: {
   sortOrder?: number;
   status?: CapabilityStatus;
   maintainedBy?: string;
+  productId?: string;
 }): Promise<string> {
   const result = await query(
     `SELECT insert_capability_version($1::uuid, $2::varchar, $3::text, $4::varchar, $5::int, $6::varchar, $7::timestamptz, $8::uuid) AS version_id`,
@@ -609,7 +612,11 @@ export async function createCapability(params: {
       params.maintainedBy ?? null,
     ]
   );
-  return result.rows[0].version_id as string;
+  const versionId = result.rows[0].version_id as string;
+  if (params.productId) {
+    await query(`UPDATE capabilities SET product_id = $1::uuid WHERE version_id = $2::uuid`, [params.productId, versionId]);
+  }
+  return versionId;
 }
 
 export async function updateCapability(params: {
@@ -620,6 +627,7 @@ export async function updateCapability(params: {
   sortOrder?: number;
   status?: CapabilityStatus;
   maintainedBy?: string;
+  productId?: string;
 }): Promise<string> {
   const result = await query(
     `SELECT update_capability_version($1::uuid, $2::varchar, $3::text, $4::varchar, $5::int, $6::varchar, $7::timestamptz, $8::uuid) AS version_id`,
@@ -634,7 +642,11 @@ export async function updateCapability(params: {
       params.maintainedBy ?? null,
     ]
   );
-  return result.rows[0].version_id as string;
+  const versionId = result.rows[0].version_id as string;
+  if (params.productId) {
+    await query(`UPDATE capabilities SET product_id = $1::uuid WHERE version_id = $2::uuid`, [params.productId, versionId]);
+  }
+  return versionId;
 }
 
 export async function getCapabilityById(id: string) {
@@ -708,4 +720,199 @@ export async function getItemCapabilities(itemType: string, itemId: string) {
     [itemType, itemId]
   );
   return result.rows;
+}
+
+// =============================================================================
+// MILESTONE HELPERS
+// =============================================================================
+
+export async function listMilestones(filters?: {
+  status?: MilestoneStatus | string;
+  releaseType?: ReleaseType | string;
+  repositoryId?: string;
+}) {
+  let sql = `SELECT DISTINCT ON (m.id)
+      m.id, m.version_id, m.title, m.description, m.version_label,
+      m.target_date, m.start_date, m.status, m.capacity_limit, m.capacity_unit,
+      m.tags, m.ai_metadata, m.maintained_by, m.repository_id,
+      m.release_type, m.release_sequence, m.valid_from, m.valid_to
+    FROM current_milestones m
+    WHERE 1=1`;
+  const params: any[] = [];
+  if (filters?.status) { params.push(filters.status); sql += ` AND m.status = $${params.length}`; }
+  if (filters?.releaseType) { params.push(filters.releaseType); sql += ` AND m.release_type = $${params.length}`; }
+  if (filters?.repositoryId) { params.push(filters.repositoryId); sql += ` AND m.repository_id = $${params.length}`; }
+  sql += ` ORDER BY m.id, m.valid_from DESC`;
+  const result = await query(sql, params);
+  return result.rows;
+}
+
+export async function getMilestoneById(id: string) {
+  const result = await query(
+    `SELECT id, version_id, title, description, version_label,
+            target_date, start_date, status, capacity_limit, capacity_unit,
+            tags, ai_metadata, maintained_by, repository_id,
+            release_type, release_sequence, valid_from, valid_to
+     FROM current_milestones
+     WHERE id = $1
+     ORDER BY valid_from DESC
+     LIMIT 1`,
+    [id]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function createMilestone(params: {
+  id: string;
+  title: string;
+  description?: string;
+  versionLabel?: string;
+  targetDate?: string;
+  startDate?: string;
+  status?: MilestoneStatus | string;
+  capacityLimit?: number;
+  capacityUnit?: string;
+  tags?: string[];
+  aiMetadata?: Record<string, unknown>;
+  maintainedBy?: string;
+  repositoryId?: string;
+  releaseType?: ReleaseType | string;
+  releaseSequence?: number;
+}): Promise<string> {
+  const result = await query(
+    `SELECT insert_milestone_version(
+      $1::uuid, $2::varchar, $3::text, $4::varchar, $5::date, $6::date,
+      $7::varchar, $8::integer, $9::varchar, $10::jsonb, $11::jsonb,
+      $12::timestamptz, $13::uuid, $14::uuid, $15::varchar, $16::integer
+    ) AS version_id`,
+    [
+      params.id,
+      params.title,
+      params.description ?? null,
+      params.versionLabel ?? null,
+      params.targetDate ?? null,
+      params.startDate ?? null,
+      params.status ?? "planning",
+      params.capacityLimit ?? null,
+      params.capacityUnit ?? "items",
+      JSON.stringify(params.tags ?? []),
+      JSON.stringify(params.aiMetadata ?? {}),
+      new Date().toISOString(),
+      params.maintainedBy ?? null,
+      params.repositoryId ?? null,
+      params.releaseType ?? "minor",
+      params.releaseSequence ?? 0,
+    ]
+  );
+  return result.rows[0].version_id as string;
+}
+
+export async function updateMilestone(params: {
+  id: string;
+  title?: string;
+  description?: string;
+  versionLabel?: string;
+  targetDate?: string;
+  startDate?: string;
+  status?: MilestoneStatus | string;
+  capacityLimit?: number;
+  capacityUnit?: string;
+  tags?: string[];
+  aiMetadata?: Record<string, unknown>;
+  maintainedBy?: string;
+  releaseType?: ReleaseType | string;
+  releaseSequence?: number;
+}): Promise<string> {
+  const result = await query(
+    `SELECT update_milestone_version(
+      $1::uuid, $2::varchar, $3::text, $4::varchar, $5::date, $6::date,
+      $7::varchar, $8::integer, $9::varchar, $10::jsonb, $11::jsonb,
+      $12::timestamptz, $13::uuid, $14::varchar, $15::integer
+    ) AS version_id`,
+    [
+      params.id,
+      params.title ?? null,
+      params.description ?? null,
+      params.versionLabel ?? null,
+      params.targetDate ?? null,
+      params.startDate ?? null,
+      params.status ?? null,
+      params.capacityLimit ?? null,
+      params.capacityUnit ?? null,
+      params.tags ? JSON.stringify(params.tags) : null,
+      params.aiMetadata ? JSON.stringify(params.aiMetadata) : null,
+      new Date().toISOString(),
+      params.maintainedBy ?? null,
+      params.releaseType ?? null,
+      params.releaseSequence ?? null,
+    ]
+  );
+  return result.rows[0].version_id as string;
+}
+
+export async function deleteMilestone(id: string): Promise<void> {
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM milestone_items WHERE milestone_id = $1::uuid`, [id]);
+    await client.query(`DELETE FROM milestones WHERE id = $1::uuid`, [id]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getMilestoneItems(milestoneId: string) {
+  const result = await query(
+    `SELECT mi.id, mi.milestone_id, mi.item_type, mi.item_id, mi.added_at, mi.added_by,
+      CASE
+        WHEN mi.item_type = 'feature' THEN (SELECT f.title FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
+        WHEN mi.item_type = 'bug' THEN (SELECT b.title FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
+        WHEN mi.item_type = 'capability' THEN (SELECT c.name FROM current_capabilities c WHERE c.id = mi.item_id LIMIT 1)
+      END AS item_title,
+      CASE
+        WHEN mi.item_type = 'feature' THEN (SELECT f.status FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
+        WHEN mi.item_type = 'bug' THEN (SELECT b.status FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
+        WHEN mi.item_type = 'capability' THEN (SELECT c.status FROM current_capabilities c WHERE c.id = mi.item_id LIMIT 1)
+      END AS item_status
+     FROM milestone_items mi
+     WHERE mi.milestone_id = $1::uuid
+     ORDER BY mi.item_type, mi.added_at`,
+    [milestoneId]
+  );
+  return result.rows;
+}
+
+export async function addMilestoneItem(params: {
+  milestoneId: string;
+  itemType: "feature" | "bug" | "capability";
+  itemId: string;
+  addedBy?: string;
+  repositoryId?: string;
+}): Promise<string> {
+  const result = await query(
+    `INSERT INTO milestone_items (milestone_id, item_type, item_id, added_by, repository_id)
+     VALUES ($1::uuid, $2::varchar, $3::uuid, $4::uuid, $5::uuid)
+     ON CONFLICT (milestone_id, item_type, item_id) DO NOTHING
+     RETURNING id`,
+    [params.milestoneId, params.itemType, params.itemId, params.addedBy ?? null, params.repositoryId ?? null]
+  );
+  return result.rows[0]?.id ?? "";
+}
+
+export async function removeMilestoneItem(params: {
+  milestoneId: string;
+  itemType: "feature" | "bug" | "capability";
+  itemId: string;
+}): Promise<void> {
+  await query(
+    `DELETE FROM milestone_items
+     WHERE milestone_id = $1::uuid
+       AND item_type = $2::varchar
+       AND item_id = $3::uuid`,
+    [params.milestoneId, params.itemType, params.itemId]
+  );
 }

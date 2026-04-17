@@ -34,6 +34,18 @@ const liveSpecContextSchema = z
   })
   .optional();
 
+const navigationContextSchema = z
+  .object({
+    current: z.object({
+      documentId: z.string(),
+      kind: z.string(),
+      title: z.string(),
+    }),
+    navigationPath: z.array(z.string()),
+    navigationDepth: z.number(),
+  })
+  .optional();
+
 export const postRequestBodySchema = z.object({
   id: z.string().uuid(),
   // Either a single new message or all messages (for tool approvals)
@@ -43,6 +55,8 @@ export const postRequestBodySchema = z.object({
   selectedVisibilityType: z.enum(["public", "private"]),
   /** Live SFDT from the editor — sent separately to avoid bloating messages */
   liveSpecContext: liveSpecContextSchema,
+  /** Navigation stack context — what the user is currently viewing */
+  navigationContext: navigationContextSchema,
 });
 
 export type PostRequestBody = z.infer<typeof postRequestBodySchema>;

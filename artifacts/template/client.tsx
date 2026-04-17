@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import {
@@ -518,7 +518,14 @@ function TemplateArtifactContent({
   metadata: TemplateArtifactMetadata;
   setMetadata: React.Dispatch<React.SetStateAction<TemplateArtifactMetadata>>;
 }) {
-  const { setArtifact } = useArtifact();
+  const { artifact, setArtifact } = useArtifact();
+
+  // Sync metadata when navigating back via breadcrumbs/pop
+  useEffect(() => {
+    if (artifact.documentId === "templates-browser" && metadata?.selectedTemplate) {
+      setMetadata((prev) => ({ ...prev, selectedTemplate: null, isDirty: false }));
+    }
+  }, [artifact.documentId, metadata?.selectedTemplate, setMetadata]);
 
   const handleSelectTemplate = useCallback(
     (template: ResolvedTemplate) => {
@@ -549,6 +556,7 @@ function TemplateArtifactContent({
 
       setArtifact((current) => ({
         ...current,
+        documentId: `template:${templateId}`,
         title: `Template: ${(template.metadata.displayName as string) || templateId}`,
         content: fullContent,
       }));
@@ -564,6 +572,7 @@ function TemplateArtifactContent({
     }));
     setArtifact((current) => ({
       ...current,
+      documentId: "templates-browser",
       title: "Template Editor",
       content: "",
     }));

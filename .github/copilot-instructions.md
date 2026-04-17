@@ -1,6 +1,6 @@
 # SPLM (Software Product Lifecycle Management) — Agent Workflow
 
-This project uses the **Agentic SPLM** framework to manage features, bugs, tasks, and specifications through MCP tools. The MCP server (`splm`) provides 28 tools for the full product lifecycle.
+This project uses the **Agentic SPLM** framework to manage features, bugs, tasks, specifications, capabilities, milestones, and repositories through MCP tools. The MCP server (`splm`) provides 43 tools for the full product lifecycle.
 
 ## Workflow Overview
 
@@ -12,6 +12,8 @@ This project uses the **Agentic SPLM** framework to manage features, bugs, tasks
 5. Implement            →  update_feature(status: "implementation") → make code changes
 6. Update Documentation →  propose_spec_change / append_spec_note
 7. Mark Done            →  update_feature(status: "done") / update_bug(status: "done")
+8. Assign Capabilities  →  assign_capability (link features/bugs to capability areas)
+9. Plan Releases        →  create_milestone / add_milestone_item
 ```
 
 ## When to Use SPLM Tools
@@ -36,7 +38,15 @@ Features and bugs follow this status cascade:
 
 Tasks follow: `todo` → `in_progress` → `done` (or `blocked`).
 
-## Tool Reference (28 tools)
+## Tool Reference (43 tools)
+
+### Repositories (4)
+| Tool | Purpose |
+|------|---------|
+| `list_repositories` | List registered repositories (filter by status) |
+| `read_repository` | Full repository details by ID |
+| `create_repository` | Register a new GitHub repository for SPLM tracking |
+| `update_repository` | Update repository fields (name, URL, status, etc.) |
 
 ### Spec Documents (5)
 | Tool | Purpose |
@@ -98,3 +108,25 @@ Tasks follow: `todo` → `in_progress` → `done` (or `blocked`).
 | Tool | Purpose |
 |------|---------|
 | `workflow_status` | Dashboard: item counts by status |
+
+### Capabilities (7)
+| Tool | Purpose |
+|------|---------|
+| `list_capabilities` | List capability areas (filter by status/SDLC phase) |
+| `read_capability` | Full capability details + linked features, bugs, tasks |
+| `create_capability` | Create a new functional capability area |
+| `update_capability` | Update capability fields (name, description, phase, etc.) |
+| `assign_capability` | Assign a feature/bug/task to a capability area |
+| `unassign_capability` | Remove a feature/bug/task from a capability area |
+| `get_item_capabilities` | Get all capabilities assigned to a feature/bug/task |
+
+### Milestones (7)
+| Tool | Purpose |
+|------|---------|
+| `list_milestones` | List release milestones (filter by status/type/repository) |
+| `read_milestone` | Full milestone details + assigned items |
+| `create_milestone` | Create a new milestone or release entry |
+| `update_milestone` | Update milestone fields (title, dates, status, capacity, etc.) |
+| `delete_milestone` | Delete a milestone and its item assignments |
+| `add_milestone_item` | Assign a feature/bug/capability to a milestone |
+| `remove_milestone_item` | Remove a feature/bug/capability from a milestone |

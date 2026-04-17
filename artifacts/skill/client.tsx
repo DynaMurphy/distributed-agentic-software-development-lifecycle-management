@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import {
@@ -230,7 +230,14 @@ function SkillArtifactContent({
   metadata: SkillArtifactMetadata;
   setMetadata: React.Dispatch<React.SetStateAction<SkillArtifactMetadata>>;
 }) {
-  const { setArtifact } = useArtifact();
+  const { artifact, setArtifact } = useArtifact();
+
+  // Sync metadata when navigating back via breadcrumbs/pop
+  useEffect(() => {
+    if (artifact.documentId === "skills-browser" && metadata?.selectedSkill) {
+      setMetadata((prev) => ({ ...prev, selectedSkill: null, isDirty: false }));
+    }
+  }, [artifact.documentId, metadata?.selectedSkill, setMetadata]);
 
   const handleSelectSkill = useCallback(
     (skill: ResolvedSkill) => {
@@ -256,6 +263,7 @@ function SkillArtifactContent({
 
       setArtifact((current) => ({
         ...current,
+        documentId: `skill:${skill.name}`,
         title: `Skill: ${(skill.metadata.displayName as string) || skill.name}`,
         content: fullContent,
       }));
@@ -271,6 +279,7 @@ function SkillArtifactContent({
     }));
     setArtifact((current) => ({
       ...current,
+      documentId: "skills-browser",
       title: "Skills Browser",
       content: "",
     }));

@@ -39,6 +39,7 @@ export interface BitemporalDocumentSummary {
  */
 export async function listBitemporalDocuments(filters?: {
   repositoryId?: string;
+  productId?: string;
 }): Promise<
   BitemporalDocumentSummary[]
 > {
@@ -47,8 +48,14 @@ export async function listBitemporalDocuments(filters?: {
       SELECT DISTINCT ON (id) id, version_id, title, valid_from, parent_id, sort_order
       FROM current_documents
     `;
-    if (filters?.repositoryId) {
-      query += ` WHERE repository_id = '${filters.repositoryId}'`;
+    const conditions: string[] = [];
+    if (filters?.productId) {
+      conditions.push(`product_id = '${filters.productId}'`);
+    } else if (filters?.repositoryId) {
+      conditions.push(`repository_id = '${filters.repositoryId}'`);
+    }
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(" AND ")}`;
     }
     query += ` ORDER BY id, valid_from DESC`;
     const rows = await client.unsafe(query);

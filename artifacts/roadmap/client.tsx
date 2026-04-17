@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import {
   DndContext,
   DragOverlay,
-  closestCorners,
+  pointerWithin,
+  rectIntersection,
   KeyboardSensor,
   PointerSensor,
   useDroppable,
@@ -13,6 +14,7 @@ import {
   useSensors,
   type DragStartEvent,
   type DragEndEvent,
+  type CollisionDetection,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -24,6 +26,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Artifact } from "@/components/create-artifact";
 import { DocumentSkeleton } from "@/components/document-skeleton";
 import { CopyIcon, SparklesIcon } from "@/components/icons";
+import { useArtifactStack } from "@/hooks/use-artifact";
 import { useSelectedRepository } from "@/hooks/use-selected-repository";
 import {
   Tooltip,
@@ -72,16 +75,55 @@ interface RoadmapItemData {
   planned_end: string | null;
   roadmap_horizon: "now" | "next" | "later" | null;
   parent_id: string | null;
+  primary_capability_id: string | null;
   capability_name: string | null;
   capability_id: string | null;
   task_total: number;
   task_done: number;
   repository_id: string;
+  milestone_id: string | null;
+  milestone_title: string | null;
+  milestone_version_label: string | null;
+  milestone_release_type: "major" | "minor" | null;
+  milestone_target_date: string | null;
+}
+
+interface MilestoneOverlay {
+  id: string;
+  title: string;
+  version_label: string | null;
+  status: string;
+  release_type: "major" | "minor";
+  start_date: string | null;
+  target_date: string | null;
+  completion_pct: number;
+  item_count: number;
+  done_count: number;
 }
 
 type RoadmapArtifactMetadata = {
   isRefreshing: boolean;
 };
+
+interface CapabilityData {
+  id: string;
+  name: string;
+  sdlc_phase: string;
+  sort_order: number;
+  status: string;
+  priority: string | null;
+  planned_start: string | null;
+  planned_end: string | null;
+  roadmap_horizon: "now" | "next" | "later" | null;
+  feature_count: number;
+  bug_count: number;
+  task_count: number;
+  milestone_id: string | null;
+  milestone_title: string | null;
+  milestone_version_label: string | null;
+  milestone_release_type: "major" | "minor" | null;
+  milestone_target_date: string | null;
+}
 
 type ZoomLevel = "quarterly" | "monthly" | "weekly";
 type ViewMode = "timeline" | "kanban";
@@ -131,7 +173,24 @@ const HORIZON_LABELS: Record<string, { title: string; description: string }> = {
   now: { title: "Now", description: "Current sprint / in-flight" },
   next: { title: "Next", description: "1–2 releases ahead" },
   later: { title: "Later", description: "Future / exploratory" },
-  unassigned: { title: "Unassigned", description: "Not yet planned" },
+  unplanned: { title: "Unplanned", description: "Not yet planned" },
+};
+
+const MILESTONE_COLORS = {
+  major: {
+    bg: "bg-indigo-200/40 dark:bg-indigo-800/30",
+    border: "border-indigo-300 dark:border-indigo-700",
+    line: "bg-indigo-400 dark:bg-indigo-600",
+    text: "text-indigo-700 dark:text-indigo-300",
+    badge: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200",
+  },
+  minor: {
+    bg: "bg-teal-200/40 dark:bg-teal-800/30",
+    border: "border-teal-300 dark:border-teal-700",
+    line: "bg-teal-400 dark:bg-teal-600",
+    text: "text-teal-700 dark:text-teal-300",
+    badge: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
+  },
 };
 
 // =============================================================================
@@ -150,7 +209,7 @@ function getColorForItem(item: RoadmapItemData, colorBy: ColorBy, capabilityColo
     case "priority":
       return PRIORITY_COLORS[item.priority] ?? "bg-gray-300 dark:bg-gray-600";
     case "capability":
-      return capabilityColorMap.get(item.capability_id ?? "") ?? "bg-gray-300 dark:bg-gray-600";
+      return capabilityColorMap.get(item.primary_capability_id ?? item.capability_id ?? "") ?? "bg-gray-300 dark:bg-gray-600";
   }
 }
 
@@ -375,14 +434,18 @@ function TimelineView({
   zoom,
   colorBy,
   capabilityColorMap,
+  milestones,
   onItemClick,
+  onCapabilityClick,
   onScheduleChange,
 }: {
   items: RoadmapItemData[];
   zoom: ZoomLevel;
   colorBy: ColorBy;
   capabilityColorMap: Map<string, string>;
+  milestones: MilestoneOverlay[];
   onItemClick?: (item: RoadmapItemData) => void;
+  onCapabilityClick?: (capId: string, capName: string) => void;
   onScheduleChange?: (itemId: string, plannedStart: string, plannedEnd: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -441,13 +504,13 @@ function TimelineView({
 
   // Group items by capability
   const grouped = useMemo(() => {
-    const groups = new Map<string, { name: string; items: RoadmapItemData[] }>();
+    const groups = new Map<string, { id: string; name: string; items: RoadmapItemData[] }>();
     const ungrouped: RoadmapItemData[] = [];
 
     for (const item of items) {
       if (item.capability_id && item.capability_name) {
         if (!groups.has(item.capability_id)) {
-          groups.set(item.capability_id, { name: item.capability_name, items: [] });
+          groups.set(item.capability_id, { id: item.capability_id, name: item.capability_name, items: [] });
         }
         groups.get(item.capability_id)!.items.push(item);
       } else {
@@ -455,12 +518,12 @@ function TimelineView({
       }
     }
 
-    const result: { name: string | null; items: RoadmapItemData[] }[] = [];
+    const result: { id: string | null; name: string | null; items: RoadmapItemData[] }[] = [];
     for (const [, group] of groups) {
       result.push(group);
     }
     if (ungrouped.length > 0) {
-      result.push({ name: null, items: ungrouped });
+      result.push({ id: null, name: null, items: ungrouped });
     }
     return result;
   }, [items]);
@@ -473,8 +536,8 @@ function TimelineView({
   const totalWidth = totalDays * pixelsPerDay;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div ref={scrollRef} className="flex-1 overflow-auto">
+    <div className="flex flex-col h-full min-w-0 overflow-hidden">
+      <div ref={scrollRef} className="flex-1 min-w-0 overflow-auto">
         <div style={{ minWidth: `${Math.max(totalWidth, 800)}px` }}>
           {/* Period headers */}
           <div className="flex border-b border-border sticky top-0 bg-background z-10">
@@ -507,13 +570,99 @@ function TimelineView({
             );
           })()}
 
+          {/* Milestone markers */}
+          {milestones.filter((ms) => ms.target_date && ms.status !== "archived").map((ms) => {
+            const msColors = MILESTONE_COLORS[ms.release_type] || MILESTONE_COLORS.minor;
+            const targetDate = parseISO(ms.target_date!);
+            if (isBefore(targetDate, timelineStart) || isAfter(targetDate, timelineEnd)) return null;
+            const targetOffset = (differenceInDays(targetDate, timelineStart) / totalDays) * 100;
+
+            // If milestone has a start_date, render a band; otherwise just a marker line
+            const hasRange = ms.start_date && !isAfter(parseISO(ms.start_date), targetDate);
+            let rangeLeftPct = 0;
+            let rangeWidthPct = 0;
+            if (hasRange) {
+              const sd = dateMax([parseISO(ms.start_date!), timelineStart]);
+              const ed = dateMin([targetDate, timelineEnd]);
+              rangeLeftPct = Math.max(0, (differenceInDays(sd, timelineStart) / totalDays) * 100);
+              rangeWidthPct = Math.max(0.5, (differenceInDays(ed, sd) / totalDays) * 100);
+            }
+
+            return (
+              <div key={ms.id} className="relative" style={{ height: 0 }}>
+                {/* Range band */}
+                {hasRange && (
+                  <div
+                    className={`absolute top-0 bottom-0 ${msColors.bg} border-y ${msColors.border} pointer-events-none z-[5]`}
+                    style={{
+                      left: `calc(12rem + ${rangeLeftPct}%)`,
+                      width: `${rangeWidthPct}%`,
+                      height: "100%",
+                      position: "absolute",
+                    }}
+                  />
+                )}
+                {/* Target date diamond marker */}
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        className={`absolute z-[15] pointer-events-auto cursor-default`}
+                        style={{
+                          left: `calc(12rem + ${targetOffset}% - 8px)`,
+                          top: "-2px",
+                        }}
+                      >
+                        <div className={`w-4 h-4 rotate-45 ${ms.release_type === "major" ? "bg-indigo-500" : "bg-teal-500"} border-2 border-white dark:border-gray-900 shadow-sm`} />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <div className="text-xs space-y-0.5">
+                        <div className="font-medium">{ms.release_type === "major" ? "🚀" : "🔧"} {ms.version_label || ms.title}</div>
+                        <div>Target: {format(targetDate, "MMM d, yyyy")}</div>
+                        <div>Progress: {ms.completion_pct}% ({ms.done_count}/{ms.item_count})</div>
+                        <div className="capitalize">Status: {ms.status}</div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                {/* Vertical marker line */}
+                <div
+                  className={`absolute top-0 w-px ${msColors.line} z-[6] pointer-events-none`}
+                  style={{
+                    left: `calc(12rem + ${targetOffset}%)`,
+                    height: "9999px",
+                    opacity: 0.5,
+                  }}
+                />
+                {/* Label at top */}
+                <div
+                  className={`absolute z-[16] text-[9px] font-semibold ${msColors.text} whitespace-nowrap pointer-events-none`}
+                  style={{
+                    left: `calc(12rem + ${targetOffset}% + 4px)`,
+                    top: "-1px",
+                  }}
+                >
+                  {ms.release_type === "major" ? "🚀" : "🔧"} {ms.version_label || ms.title}
+                </div>
+              </div>
+            );
+          })}
+
           {/* Grouped rows */}
           {grouped.map((group, gi) => (
             <div key={gi}>
-              {group.name && (
+              {group.name && group.id && (
                 <div className="flex border-b border-border/50 bg-muted/20">
                   <div className="w-48 min-w-48 border-r border-border px-2 py-1 text-xs font-semibold text-muted-foreground flex items-center gap-1">
-                    <span>🧩</span> {group.name}
+                    <span>🧩</span>
+                    <button
+                      type="button"
+                      onClick={() => onCapabilityClick?.(group.id!, group.name!)}
+                      className="hover:underline text-left truncate"
+                    >
+                      {group.name}
+                    </button>
                   </div>
                   <div className="flex-1" />
                 </div>
@@ -603,12 +752,192 @@ function TimelineView({
 // KANBAN VIEW COMPONENTS
 // =============================================================================
 
-function KanbanCard({
+/** Unified item type for kanban — either a capability or a feature/bug */
+type KanbanItem =
+  | { kind: "capability"; data: CapabilityData; features: RoadmapItemData[] }
+  | { kind: "feature"; data: RoadmapItemData };
+
+function CapabilityKanbanCard({
+  cap,
+  allFeatures,
+  laneId,
+  onFeatureClick,
+  onCapabilityClick,
+  onFeaturePhaseToggle,
+}: {
+  cap: CapabilityData;
+  allFeatures: RoadmapItemData[];
+  laneId: string;
+  onFeatureClick?: (item: RoadmapItemData) => void;
+  onCapabilityClick?: (cap: CapabilityData) => void;
+  onFeaturePhaseToggle?: (featureId: string, milestoneId: string | null, assign: boolean) => void;
+}) {
+  const [otherPhasesOpen, setOtherPhasesOpen] = useState(false);
+  const [thisPhasesOpen, setThisPhasesOpen] = useState(true);
+
+  const badge = cap.priority ? PRIORITY_BADGES[cap.priority] : null;
+  const totalFeatures = cap.feature_count;
+
+  // Split features into "this phase" and "other phases"
+  const isUnplannedLane = laneId === "unplanned";
+  const thisPhaseFeatures = isUnplannedLane
+    ? allFeatures.filter((f) => !f.milestone_id)
+    : allFeatures.filter((f) => f.milestone_id === laneId);
+  const otherPhaseFeatures = isUnplannedLane
+    ? allFeatures.filter((f) => f.milestone_id)
+    : allFeatures.filter((f) => f.milestone_id !== laneId && f.milestone_id);
+  const unplannedFeatures = isUnplannedLane
+    ? []
+    : allFeatures.filter((f) => !f.milestone_id);
+
+  // Selectable features = this phase + unplanned (in milestone lanes)
+  const selectableFeatures = [...thisPhaseFeatures, ...unplannedFeatures];
+  const doneFeatures = allFeatures.filter((f) => f.status === "done").length;
+
+  return (
+    <div className="w-full text-left rounded-lg border-2 border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 transition-all hover:shadow-md">
+      <div className="p-3">
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="text-xs">🧩</span>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onCapabilityClick?.(cap); }}
+            className="text-sm font-semibold line-clamp-2 text-left hover:underline"
+          >
+            {cap.name}
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap mb-1">
+          {badge && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${badge.className}`}>
+              {badge.label}
+            </span>
+          )}
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 font-medium capitalize">
+            {cap.sdlc_phase.replace("_", " ")}
+          </span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+            {totalFeatures} feature{totalFeatures !== 1 ? "s" : ""}
+          </span>
+        </div>
+        {totalFeatures > 0 && (
+          <div className="mt-1.5">
+            <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
+              <span>Features</span>
+              <span>{doneFeatures}/{totalFeatures}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  doneFeatures === totalFeatures ? "bg-green-500" : "bg-blue-500"
+                }`}
+                style={{ width: `${totalFeatures > 0 ? (doneFeatures / totalFeatures) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Other Phases — read-only, collapsible */}
+      {otherPhaseFeatures.length > 0 && (
+        <div className="border-t border-blue-200/50 dark:border-blue-800/50">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setOtherPhasesOpen(!otherPhasesOpen); }}
+            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold text-muted-foreground hover:bg-blue-100/50 dark:hover:bg-blue-900/30 transition-colors"
+          >
+            <span className="text-[9px]">{otherPhasesOpen ? "▾" : "▸"}</span>
+            <span>Planned in Other Phases</span>
+            <span className="text-[9px] opacity-60">({otherPhaseFeatures.length})</span>
+          </button>
+          {otherPhasesOpen && (
+            <div className="px-2 pb-1.5 space-y-1">
+              {otherPhaseFeatures.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onFeatureClick?.(f); }}
+                  className="w-full text-left text-xs px-2 py-1 rounded bg-muted/40 border border-border/30 flex items-center gap-1.5 transition-colors opacity-60 hover:opacity-80"
+                  title={`${f.title} — ${f.milestone_version_label || f.milestone_title || "planned"}`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_COLORS[f.status] || "bg-gray-300"}`} />
+                  <span className="truncate">{f.title}</span>
+                  {f.milestone_version_label && (
+                    <span className="text-[9px] text-muted-foreground flex-shrink-0 ml-auto">{f.milestone_version_label}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* This Phase — selectable with checkmarks (in milestone lanes) */}
+      {selectableFeatures.length > 0 && (
+        <div className="border-t border-blue-200/50 dark:border-blue-800/50">
+          {!isUnplannedLane && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setThisPhasesOpen(!thisPhasesOpen); }}
+              className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold text-muted-foreground hover:bg-blue-100/50 dark:hover:bg-blue-900/30 transition-colors"
+            >
+              <span className="text-[9px]">{thisPhasesOpen ? "▾" : "▸"}</span>
+              <span>This Phase</span>
+              <span className="text-[9px] opacity-60">({thisPhaseFeatures.length} planned{unplannedFeatures.length > 0 ? `, ${unplannedFeatures.length} available` : ""})</span>
+            </button>
+          )}
+          {(isUnplannedLane || thisPhasesOpen) && (
+            <div className="px-2 pb-1.5 space-y-1">
+              {selectableFeatures.map((f) => {
+                const isPlanned = !!f.milestone_id && f.milestone_id === laneId;
+                return (
+                  <div key={f.id} className="flex items-center gap-1">
+                    {!isUnplannedLane && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onFeaturePhaseToggle?.(f.id, laneId, !isPlanned);
+                        }}
+                        className={`flex-shrink-0 w-3.5 h-3.5 rounded border transition-colors flex items-center justify-center ${
+                          isPlanned
+                            ? "bg-blue-500 border-blue-500 text-white"
+                            : "border-border hover:border-blue-400"
+                        }`}
+                        title={isPlanned ? "Remove from this phase" : "Add to this phase"}
+                      >
+                        {isPlanned && (
+                          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onFeatureClick?.(f); }}
+                      className="flex-1 min-w-0 text-left text-xs px-2 py-1 rounded bg-card/80 hover:bg-accent/50 border border-border/50 flex items-center gap-1.5 transition-colors"
+                      title={f.title}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_COLORS[f.status] || "bg-gray-300"}`} />
+                      <span className="truncate">{f.title}</span>
+                      {f.priority === "critical" && <span className="text-[9px] text-red-500 flex-shrink-0">●</span>}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeatureKanbanCard({
   item,
-  onClick,
 }: {
   item: RoadmapItemData;
-  onClick?: () => void;
 }) {
   const progress = getProgressPercent(item);
   const badge = PRIORITY_BADGES[item.priority];
@@ -616,62 +945,36 @@ function KanbanCard({
 
   return (
     <div
-      className={`w-full text-left p-3 rounded-lg border transition-all hover:shadow-md ${
+      className={`w-full text-left p-2.5 rounded-lg border transition-all hover:shadow-md text-xs ${
         isAtRisk
           ? "border-red-300 dark:border-red-700 bg-red-50/50 dark:bg-red-950/20"
           : "border-border bg-card hover:bg-accent/50"
       }`}
     >
-      <div className="text-sm font-medium mb-1.5 line-clamp-2">{item.title}</div>
-      <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+      <div className="text-xs font-medium mb-1 line-clamp-2">{item.title}</div>
+      <div className="flex items-center gap-1 flex-wrap">
         {badge && (
           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${badge.className}`}>
             {badge.label}
-          </span>
-        )}
-        {item.capability_name && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 font-medium">
-            {item.capability_name}
           </span>
         )}
         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground capitalize">
           {item.status.replace("_", " ")}
         </span>
       </div>
-      {progress !== null && (
-        <div className="mt-2">
-          <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
-            <span>Progress</span>
-            <span>{progress}%</span>
-          </div>
-          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${
-                progress === 100
-                  ? "bg-green-500"
-                  : progress > 50
-                    ? "bg-blue-500"
-                    : "bg-orange-500"
-              }`}
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-      )}
-      {isAtRisk && (
-        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-red-600 dark:text-red-400">
-          <span>⚠️</span> At Risk
-        </div>
-      )}
     </div>
   );
 }
 
-function SortableKanbanCard({
-  item,
+function SortableKanbanItem({
+  itemId,
+  itemType,
+  children,
   onClick,
 }: {
-  item: RoadmapItemData;
+  itemId: string;
+  itemType: "capability" | "feature";
+  children: React.ReactNode;
   onClick?: () => void;
 }) {
   const {
@@ -681,7 +984,7 @@ function SortableKanbanCard({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.id, data: { type: "card", item } });
+  } = useSortable({ id: itemId, data: { type: itemType } });
 
   const style = {
     transform: CSS.Translate.toString(transform),
@@ -695,58 +998,109 @@ function SortableKanbanCard({
       style={{ ...style, touchAction: "none" }}
       {...attributes}
       {...listeners}
-      onClick={() => { if (!isDragging) onClick?.(); }}
+      onClick={() => { if (!isDragging && onClick) onClick(); }}
       className="cursor-grab active:cursor-grabbing"
     >
-      <KanbanCard item={item} />
+      {children}
     </div>
   );
 }
 
 function KanbanLane({
-  horizon,
-  items,
+  laneId,
+  title,
+  description,
+  accent,
+  capEntries,
+  orphanFeatures,
   onItemClick,
+  onCapabilityClick,
+  onFeaturePhaseToggle,
 }: {
-  horizon: string;
-  items: RoadmapItemData[];
+  laneId: string;
+  title: string;
+  description: string;
+  accent?: string;
+  capEntries: { cap: CapabilityData; features: RoadmapItemData[] }[];
+  orphanFeatures: RoadmapItemData[];
   onItemClick?: (item: RoadmapItemData) => void;
+  onCapabilityClick?: (cap: CapabilityData) => void;
+  onFeaturePhaseToggle?: (featureId: string, milestoneId: string | null, assign: boolean) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `lane-${horizon}` });
-  const info = HORIZON_LABELS[horizon] ?? { title: horizon, description: "" };
+  const { setNodeRef, isOver } = useDroppable({ id: `lane-${laneId}` });
+  const totalItems = capEntries.length + orphanFeatures.length;
+
+  // All draggable IDs: capability IDs scoped to lane to handle multi-lane presence
+  const allIds = [
+    ...capEntries.map((e) => `cap-${e.cap.id}-${laneId}`),
+    ...orphanFeatures.map((f) => f.id),
+  ];
 
   return (
     <div
       ref={setNodeRef}
-      className={`flex-1 min-w-64 flex flex-col rounded-lg border border-border overflow-hidden transition-colors ${
+      className={`flex-1 min-w-72 flex flex-col rounded-lg border border-border overflow-hidden transition-colors ${
         isOver ? "bg-primary/5 border-primary/30" : "bg-muted/20"
       }`}
     >
       <div className="px-3 py-2 border-b border-border bg-muted/30">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-semibold">{info.title}</div>
-            <div className="text-[10px] text-muted-foreground">{info.description}</div>
+            <div className="flex items-center gap-1.5">
+              {accent && <div className={`w-2.5 h-2.5 rounded-sm ${accent}`} />}
+              <div className="text-sm font-semibold">{title}</div>
+            </div>
+            <div className="text-[10px] text-muted-foreground">{description}</div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs bg-muted px-1.5 py-0.5 rounded-full">{items.length}</span>
+            <span className="text-xs bg-muted px-1.5 py-0.5 rounded-full">{totalItems}</span>
           </div>
         </div>
       </div>
-      <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+      <SortableContext items={allIds} strategy={verticalListSortingStrategy}>
         <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[80px]">
-          {items.length === 0 ? (
+          {totalItems === 0 ? (
             <div className="text-xs text-muted-foreground/50 text-center py-8 italic">
-              Drag features here to plan for {info.title.toLowerCase()}
+              Drag capabilities or features here
             </div>
           ) : (
-            items.map((item) => (
-              <SortableKanbanCard
-                key={item.id}
-                item={item}
-                onClick={() => onItemClick?.(item)}
-              />
-            ))
+            <>
+              {capEntries.map(({ cap, features }) => (
+                <SortableKanbanItem
+                  key={`cap-${cap.id}-${laneId}`}
+                  itemId={`cap-${cap.id}-${laneId}`}
+                  itemType="capability"
+                >
+                  <CapabilityKanbanCard
+                    cap={cap}
+                    allFeatures={features}
+                    laneId={laneId}
+                    onFeatureClick={onItemClick}
+                    onCapabilityClick={onCapabilityClick}
+                    onFeaturePhaseToggle={onFeaturePhaseToggle}
+                  />
+                </SortableKanbanItem>
+              ))}
+              {orphanFeatures.length > 0 && capEntries.length > 0 && (
+                <div className="flex items-center gap-1.5 px-1 py-1 mt-2">
+                  <div className="w-2 h-2 rounded-full bg-gray-400" />
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Unplanned Features
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">({orphanFeatures.length})</span>
+                </div>
+              )}
+              {orphanFeatures.map((item) => (
+                <SortableKanbanItem
+                  key={item.id}
+                  itemId={item.id}
+                  itemType="feature"
+                  onClick={() => onItemClick?.(item)}
+                >
+                  <FeatureKanbanCard item={item} />
+                </SortableKanbanItem>
+              ))}
+            </>
           )}
         </div>
       </SortableContext>
@@ -756,12 +1110,20 @@ function KanbanLane({
 
 function KanbanView({
   items,
+  milestones,
+  capabilities,
   onItemClick,
-  onHorizonChange,
+  onCapabilityClick,
+  onMilestoneAssign,
+  onFeaturePhaseToggle,
 }: {
   items: RoadmapItemData[];
+  milestones: MilestoneOverlay[];
+  capabilities: CapabilityData[];
   onItemClick?: (item: RoadmapItemData) => void;
-  onHorizonChange?: (itemId: string, horizon: string) => void;
+  onCapabilityClick?: (cap: CapabilityData) => void;
+  onMilestoneAssign?: (itemId: string, milestoneId: string | null, itemType: "feature" | "capability") => void;
+  onFeaturePhaseToggle?: (featureId: string, milestoneId: string | null, assign: boolean) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -770,25 +1132,128 @@ function KanbanView({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const lanes = useMemo(() => {
-    const now: RoadmapItemData[] = [];
-    const next: RoadmapItemData[] = [];
-    const later: RoadmapItemData[] = [];
-    const unassigned: RoadmapItemData[] = [];
+  // Sort milestones: active first, then by target_date
+  const sortedMilestones = useMemo(() => {
+    return [...milestones]
+      .filter((m) => m.status !== "released" && m.status !== "archived")
+      .sort((a, b) => {
+        if (a.status === "active" && b.status !== "active") return -1;
+        if (b.status === "active" && a.status !== "active") return 1;
+        if (a.release_type === "major" && b.release_type !== "major") return -1;
+        if (b.release_type === "major" && a.release_type !== "major") return 1;
+        const ta = a.target_date ? new Date(a.target_date).getTime() : Infinity;
+        const tb = b.target_date ? new Date(b.target_date).getTime() : Infinity;
+        return ta - tb;
+      });
+  }, [milestones]);
 
+  // Build feature lookup by capability_id from junction table (source of truth)
+  const featuresByCapability = useMemo(() => {
+    const map = new Map<string, RoadmapItemData[]>();
+    const orphans: RoadmapItemData[] = [];
     for (const item of items) {
-      switch (item.roadmap_horizon) {
-        case "now": now.push(item); break;
-        case "next": next.push(item); break;
-        case "later": later.push(item); break;
-        default: unassigned.push(item); break;
+      const capId = item.capability_id;
+      if (capId) {
+        if (!map.has(capId)) map.set(capId, []);
+        map.get(capId)!.push(item);
+      } else {
+        orphans.push(item);
       }
     }
-
-    return { now, next, later, unassigned };
+    return { map, orphans };
   }, [items]);
 
+  // Build lanes for capabilities — a capability appears in each lane where it has features
+  // and in the Unplanned lane if it has any unplanned features
+  const capLanes = useMemo(() => {
+    const result: Record<string, { cap: CapabilityData; features: RoadmapItemData[] }[]> = { unplanned: [] };
+    for (const m of sortedMilestones) {
+      result[m.id] = [];
+    }
+    for (const cap of capabilities) {
+      const allCapFeatures = featuresByCapability.map.get(cap.id) ?? [];
+      if (allCapFeatures.length === 0) {
+        // Capability with no features: place based on capability's own milestone
+        const entry = { cap, features: allCapFeatures };
+        if (cap.milestone_id && result[cap.milestone_id]) {
+          result[cap.milestone_id].push(entry);
+        } else {
+          result.unplanned.push(entry);
+        }
+        continue;
+      }
+
+      // Group features by their milestone
+      const unplannedFeatures = allCapFeatures.filter((f) => !f.milestone_id);
+      const plannedByMilestone = new Map<string, RoadmapItemData[]>();
+      for (const f of allCapFeatures) {
+        if (f.milestone_id) {
+          if (!plannedByMilestone.has(f.milestone_id)) plannedByMilestone.set(f.milestone_id, []);
+          plannedByMilestone.get(f.milestone_id)!.push(f);
+        }
+      }
+
+      // Place capability in each milestone lane where it has features
+      for (const [msId] of plannedByMilestone) {
+        if (result[msId]) {
+          result[msId].push({ cap, features: allCapFeatures });
+        }
+      }
+
+      // Place in Unplanned if there are unplanned features
+      if (unplannedFeatures.length > 0) {
+        result.unplanned.push({ cap, features: allCapFeatures });
+      }
+
+      // If capability has no features in any lane yet, fall back to its own milestone
+      if (plannedByMilestone.size === 0 && unplannedFeatures.length === 0) {
+        const entry = { cap, features: allCapFeatures };
+        if (cap.milestone_id && result[cap.milestone_id]) {
+          result[cap.milestone_id].push(entry);
+        } else {
+          result.unplanned.push(entry);
+        }
+      }
+    }
+    return result;
+  }, [capabilities, sortedMilestones, featuresByCapability.map]);
+
+  // Build lanes for orphan features (no capability) by their milestone
+  const orphanLanes = useMemo(() => {
+    const result: Record<string, RoadmapItemData[]> = { unplanned: [] };
+    for (const m of sortedMilestones) {
+      result[m.id] = [];
+    }
+    for (const item of featuresByCapability.orphans) {
+      if (item.milestone_id && result[item.milestone_id]) {
+        result[item.milestone_id].push(item);
+      } else {
+        result.unplanned.push(item);
+      }
+    }
+    return result;
+  }, [featuresByCapability.orphans, sortedMilestones]);
+
+  // Build lane map for drag-and-drop resolution
+  const itemLaneMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [laneId, entries] of Object.entries(capLanes)) {
+      for (const entry of entries) {
+        map.set(`cap-${entry.cap.id}-${laneId}`, laneId);
+      }
+    }
+    for (const [laneId, feats] of Object.entries(orphanLanes)) {
+      for (const f of feats) {
+        map.set(f.id, laneId);
+      }
+    }
+    return map;
+  }, [capLanes, orphanLanes]);
+
   const activeItem = activeId ? items.find((i) => i.id === activeId) : null;
+  const activeCap = activeId?.startsWith("cap-")
+    ? capabilities.find((c) => activeId.startsWith(`cap-${c.id}-`))
+    : null;
 
   function handleDragStart(event: DragStartEvent) {
     setActiveId(event.active.id as string);
@@ -799,50 +1264,88 @@ function KanbanView({
     const { active, over } = event;
     if (!over) return;
 
-    const itemId = active.id as string;
+    const dragId = active.id as string;
     const overId = over.id as string;
 
-    // Resolve target lane from drop target
-    let targetHorizon: string | null = null;
+    let targetLane: string | null = null;
     if (overId.startsWith("lane-")) {
-      targetHorizon = overId.replace("lane-", "");
+      targetLane = overId.replace("lane-", "");
     } else {
-      // Dropped on another card — find which lane it belongs to
-      for (const [horizon, laneItems] of Object.entries(lanes)) {
-        if (laneItems.some((i) => i.id === overId)) {
-          targetHorizon = horizon;
-          break;
-        }
-      }
+      targetLane = itemLaneMap.get(overId) ?? null;
     }
 
-    if (targetHorizon && ["now", "next", "later", "unassigned"].includes(targetHorizon)) {
-      const item = items.find((i) => i.id === itemId);
-      const currentHorizon = item?.roadmap_horizon ?? "unassigned";
-      if (currentHorizon !== targetHorizon) {
-        // Use null for "unassigned" to clear the horizon
-        onHorizonChange?.(itemId, targetHorizon === "unassigned" ? "" : targetHorizon);
+    if (targetLane !== null) {
+      const currentLane = itemLaneMap.get(dragId) ?? "unplanned";
+      if (currentLane !== targetLane) {
+        const newMilestoneId = targetLane === "unplanned" ? null : targetLane;
+        if (dragId.startsWith("cap-")) {
+          // Extract capId from lane-scoped ID: cap-{uuid}-{laneId}
+          const parts = dragId.split("-");
+          // UUID is parts[1..5] (5 segments), laneId is the rest
+          const capId = parts.slice(1, 6).join("-");
+          onMilestoneAssign?.(capId, newMilestoneId, "capability");
+        } else {
+          onMilestoneAssign?.(dragId, newMilestoneId, "feature");
+        }
       }
     }
   }
 
+  const collisionDetection: CollisionDetection = useCallback((args) => {
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length > 0) {
+      const laneHit = pointerCollisions.find((c) => String(c.id).startsWith("lane-"));
+      if (laneHit) return [laneHit];
+      return pointerCollisions;
+    }
+    return rectIntersection(args);
+  }, []);
+
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCorners}
+      collisionDetection={collisionDetection}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
       <div className="flex gap-3 p-3 h-full overflow-x-auto">
-        <KanbanLane horizon="now" items={lanes.now} onItemClick={onItemClick} />
-        <KanbanLane horizon="next" items={lanes.next} onItemClick={onItemClick} />
-        <KanbanLane horizon="later" items={lanes.later} onItemClick={onItemClick} />
-        <KanbanLane horizon="unassigned" items={lanes.unassigned} onItemClick={onItemClick} />
+        <KanbanLane
+          laneId="unplanned"
+          title="📥 Unplanned"
+          description="Not in any release"
+          capEntries={capLanes.unplanned}
+          orphanFeatures={orphanLanes.unplanned}
+          onItemClick={onItemClick}
+          onCapabilityClick={onCapabilityClick}
+          onFeaturePhaseToggle={onFeaturePhaseToggle}
+        />
+        {sortedMilestones.map((m) => (
+          <KanbanLane
+            key={m.id}
+            laneId={m.id}
+            title={`${m.release_type === "major" ? "🚀" : "🔧"} ${m.version_label || m.title}`}
+            description={`${m.status}${m.target_date ? ` · due ${m.target_date}` : ""}${m.item_count > 0 ? ` · ${m.completion_pct}% done` : ""}`}
+            accent={m.release_type === "major" ? "bg-indigo-500" : "bg-teal-500"}
+            capEntries={capLanes[m.id] ?? []}
+            orphanFeatures={orphanLanes[m.id] ?? []}
+            onItemClick={onItemClick}
+            onCapabilityClick={onCapabilityClick}
+            onFeaturePhaseToggle={onFeaturePhaseToggle}
+          />
+        ))}
       </div>
       <DragOverlay>
-        {activeItem ? (
+        {activeCap ? (
+          <div className="opacity-90 w-72">
+            <CapabilityKanbanCard
+              cap={activeCap}
+              allFeatures={featuresByCapability.map.get(activeCap.id) ?? []}
+              laneId="unplanned"
+            />
+          </div>
+        ) : activeItem ? (
           <div className="opacity-90 w-64">
-            <KanbanCard item={activeItem} />
+            <FeatureKanbanCard item={activeItem} />
           </div>
         ) : null}
       </DragOverlay>
@@ -856,12 +1359,14 @@ function KanbanView({
 
 function FilterBar({
   items,
+  milestoneOverlays,
   filters,
   setFilters,
 }: {
   items: RoadmapItemData[];
-  filters: { capability: string | null; priority: string | null; status: string | null };
-  setFilters: (f: { capability: string | null; priority: string | null; status: string | null }) => void;
+  milestoneOverlays: MilestoneOverlay[];
+  filters: { capability: string | null; priority: string | null; status: string | null; milestone: string | null; releaseType: string | null };
+  setFilters: (f: { capability: string | null; priority: string | null; status: string | null; milestone: string | null; releaseType: string | null }) => void;
 }) {
   const capabilities = useMemo(() => {
     const set = new Map<string, string>();
@@ -873,13 +1378,27 @@ function FilterBar({
     return Array.from(set.entries());
   }, [items]);
 
+  // Merge milestones from both the overlay list and from items
+  const milestones = useMemo(() => {
+    const set = new Map<string, string>();
+    for (const m of milestoneOverlays) {
+      set.set(m.id, m.version_label || m.title);
+    }
+    for (const item of items) {
+      if (item.milestone_id && !set.has(item.milestone_id)) {
+        set.set(item.milestone_id, item.milestone_version_label || item.milestone_title || item.milestone_id);
+      }
+    }
+    return Array.from(set.entries());
+  }, [milestoneOverlays, items]);
+
   const statuses = useMemo(() => {
     return Array.from(new Set(items.map((i) => i.status)));
   }, [items]);
 
   const priorities = ["critical", "high", "medium", "low"];
 
-  const activeCount = [filters.capability, filters.priority, filters.status].filter(Boolean).length;
+  const activeCount = [filters.capability, filters.priority, filters.status, filters.milestone, filters.releaseType].filter(Boolean).length;
 
   return (
     <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border bg-muted/10 flex-wrap">
@@ -896,6 +1415,17 @@ function FilterBar({
       </select>
       <select
         className="text-xs bg-background border border-border rounded px-1.5 py-0.5"
+        value={filters.milestone ?? ""}
+        onChange={(e) => setFilters({ ...filters, milestone: e.target.value || null })}
+      >
+        <option value="">All Milestones</option>
+        <option value="__none__">No Milestone</option>
+        {milestones.map(([id, label]) => (
+          <option key={id} value={id}>{label}</option>
+        ))}
+      </select>
+      <select
+        className="text-xs bg-background border border-border rounded px-1.5 py-0.5"
         value={filters.priority ?? ""}
         onChange={(e) => setFilters({ ...filters, priority: e.target.value || null })}
       >
@@ -903,6 +1433,15 @@ function FilterBar({
         {priorities.map((p) => (
           <option key={p} value={p} className="capitalize">{p}</option>
         ))}
+      </select>
+      <select
+        className="text-xs bg-background border border-border rounded px-1.5 py-0.5"
+        value={filters.releaseType ?? ""}
+        onChange={(e) => setFilters({ ...filters, releaseType: e.target.value || null })}
+      >
+        <option value="">All Release Types</option>
+        <option value="major">Major Releases</option>
+        <option value="minor">Minor Releases</option>
       </select>
       <select
         className="text-xs bg-background border border-border rounded px-1.5 py-0.5"
@@ -917,7 +1456,7 @@ function FilterBar({
       {activeCount > 0 && (
         <button
           type="button"
-          onClick={() => setFilters({ capability: null, priority: null, status: null })}
+          onClick={() => setFilters({ capability: null, priority: null, status: null, milestone: null, releaseType: null })}
           className="text-xs text-muted-foreground hover:text-foreground underline"
         >
           Clear all
@@ -960,26 +1499,40 @@ function StatusLegend({ colorBy }: { colorBy: ColorBy }) {
 function RoadmapContent({ content }: { content: string }) {
   const { selectedRepositoryId } = useSelectedRepository();
   const [allItems, setAllItems] = useState<RoadmapItemData[]>([]);
-  const [viewMode, setViewMode] = useState<ViewMode>("timeline");
+  const [milestones, setMilestones] = useState<MilestoneOverlay[]>([]);
+  const [capabilities, setCapabilities] = useState<CapabilityData[]>([]);
+  const [viewMode, setViewMode] = useState<ViewMode>("kanban");
   const [zoom, setZoom] = useState<ZoomLevel>("monthly");
   const [colorBy, setColorBy] = useState<ColorBy>("status");
   const [filters, setFilters] = useState<{
     capability: string | null;
     priority: string | null;
     status: string | null;
-  }>({ capability: null, priority: null, status: null });
+    milestone: string | null;
+    releaseType: string | null;
+  }>({ capability: null, priority: null, status: null, milestone: null, releaseType: null });
 
   const hasFetchedRef = useRef(false);
 
-  // Fetch roadmap data
+  // Fetch roadmap data with milestones
   useEffect(() => {
-    const repoParam = selectedRepositoryId
-      ? `?repositoryId=${selectedRepositoryId}`
+    const productParam = selectedRepositoryId
+      ? `productId=${selectedRepositoryId}&`
       : "";
-    fetch(`/api/roadmap${repoParam}`)
-      .then((res) => (res.ok ? res.json() : []))
+    fetch(`/api/roadmap?${productParam}includeMilestones=true`)
+      .then((res) => (res.ok ? res.json() : { items: [], milestones: [] }))
       .then((data) => {
-        if (Array.isArray(data)) {
+        if (data && data.items && Array.isArray(data.items)) {
+          hasFetchedRef.current = true;
+          setAllItems(data.items);
+          if (Array.isArray(data.milestones)) {
+            setMilestones(data.milestones);
+          }
+          if (Array.isArray(data.capabilities)) {
+            setCapabilities(data.capabilities);
+          }
+        } else if (Array.isArray(data)) {
+          // Backward compat: old API returns array directly
           hasFetchedRef.current = true;
           setAllItems(data);
         }
@@ -1004,13 +1557,23 @@ function RoadmapContent({ content }: { content: string }) {
   const filteredItems = useMemo(() => {
     let result = allItems;
     if (filters.capability) {
-      result = result.filter((i) => i.capability_id === filters.capability);
+      result = result.filter((i) => (i.primary_capability_id ?? i.capability_id) === filters.capability);
     }
     if (filters.priority) {
       result = result.filter((i) => i.priority === filters.priority);
     }
     if (filters.status) {
       result = result.filter((i) => i.status === filters.status);
+    }
+    if (filters.releaseType) {
+      result = result.filter((i) => i.milestone_release_type === filters.releaseType || !i.milestone_id);
+    }
+    if (filters.milestone && filters.milestone !== "__none__") {
+      // In kanban: show matching milestone items + unplanned (for drag-drop)
+      // In timeline: only show matching milestone items
+      result = result.filter((i) => i.milestone_id === filters.milestone || !i.milestone_id);
+    } else if (filters.milestone === "__none__") {
+      result = result.filter((i) => !i.milestone_id);
     }
     return result;
   }, [allItems, filters]);
@@ -1051,10 +1614,10 @@ function RoadmapContent({ content }: { content: string }) {
     } catch {
       // Revert
       toast.error("Failed to update horizon");
-      const repoParam = selectedRepositoryId
-        ? `?repositoryId=${selectedRepositoryId}`
+      const productParam = selectedRepositoryId
+        ? `?productId=${selectedRepositoryId}`
         : "";
-      fetch(`/api/roadmap${repoParam}`)
+      fetch(`/api/roadmap${productParam}`)
         .then((res) => (res.ok ? res.json() : []))
         .then((data) => {
           if (Array.isArray(data)) setAllItems(data);
@@ -1082,10 +1645,10 @@ function RoadmapContent({ content }: { content: string }) {
       toast.success("Schedule updated");
     } catch {
       toast.error("Failed to update schedule");
-      const repoParam = selectedRepositoryId
-        ? `?repositoryId=${selectedRepositoryId}`
+      const productParam = selectedRepositoryId
+        ? `?productId=${selectedRepositoryId}`
         : "";
-      fetch(`/api/roadmap${repoParam}`)
+      fetch(`/api/roadmap${productParam}`)
         .then((res) => (res.ok ? res.json() : []))
         .then((data) => {
           if (Array.isArray(data)) setAllItems(data);
@@ -1094,17 +1657,326 @@ function RoadmapContent({ content }: { content: string }) {
     }
   }, [selectedRepositoryId]);
 
+  const { push } = useArtifactStack();
+
   const handleItemClick = useCallback((item: RoadmapItemData) => {
-    // Could navigate to feature detail - for now just show toast
-    toast.info(`${item.title} — ${item.status}`);
-  }, []);
+    push({
+      documentId: item.id,
+      kind: "feature",
+      title: item.title,
+    });
+  }, [push]);
+
+  const handleCapabilityClick = useCallback((cap: CapabilityData) => {
+    push({
+      documentId: cap.id,
+      kind: "capability",
+      title: cap.name,
+    });
+  }, [push]);
+
+  // Handle milestone assignment from kanban drag-and-drop
+  const handleMilestoneAssign = useCallback(async (itemId: string, milestoneId: string | null, itemType: "feature" | "capability") => {
+    const targetMs = milestoneId ? milestones.find((m) => m.id === milestoneId) : null;
+    const label = targetMs ? (targetMs.version_label || targetMs.title) : "Unplanned";
+
+    if (itemType === "capability") {
+      const cap = capabilities.find((c) => c.id === itemId);
+      if (!cap) return;
+      const previousMilestoneId = cap.milestone_id;
+
+      // Collect unplanned features belonging to this capability — they move with the card
+      const capFeatures = allItems.filter((i) => i.capability_id === itemId);
+      const unplannedFeatures = milestoneId
+        ? capFeatures.filter((f) => !f.milestone_id)
+        : []; // When dragging to Unplanned, only the capability itself moves
+
+      // Optimistic update — capability
+      setCapabilities((prev) =>
+        prev.map((c) =>
+          c.id === itemId
+            ? {
+                ...c,
+                milestone_id: milestoneId,
+                milestone_title: targetMs?.title ?? null,
+                milestone_version_label: targetMs?.version_label ?? null,
+                milestone_release_type: targetMs?.release_type ?? null,
+                milestone_target_date: targetMs?.target_date ?? null,
+              }
+            : c
+        )
+      );
+
+      // Optimistic update — move unplanned features to target milestone
+      const movedFeatureIds = new Set(unplannedFeatures.map((f) => f.id));
+      if (movedFeatureIds.size > 0) {
+        setAllItems((prev) =>
+          prev.map((i) =>
+            movedFeatureIds.has(i.id)
+              ? {
+                  ...i,
+                  milestone_id: milestoneId,
+                  milestone_title: targetMs?.title ?? null,
+                  milestone_version_label: targetMs?.version_label ?? null,
+                  milestone_release_type: targetMs?.release_type ?? null,
+                  milestone_target_date: targetMs?.target_date ?? null,
+                }
+              : i
+          )
+        );
+      }
+
+      try {
+        // Move capability itself
+        if (previousMilestoneId) {
+          const removeRes = await fetch(`/api/milestones/${previousMilestoneId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "remove", itemType: "capability", itemId }),
+          });
+          if (!removeRes.ok) throw new Error("Failed to remove from milestone");
+        }
+        if (milestoneId) {
+          const addRes = await fetch(`/api/milestones/${milestoneId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "add", itemType: "capability", itemId }),
+          });
+          if (!addRes.ok) throw new Error("Failed to add to milestone");
+        }
+
+        // Move unplanned features in parallel
+        if (milestoneId && unplannedFeatures.length > 0) {
+          await Promise.all(
+            unplannedFeatures.map((f) =>
+              fetch(`/api/milestones/${milestoneId}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "add", itemType: "feature", itemId: f.id }),
+              })
+            )
+          );
+        }
+
+        const featureNote = unplannedFeatures.length > 0
+          ? ` (+${unplannedFeatures.length} feature${unplannedFeatures.length !== 1 ? "s" : ""})`
+          : "";
+        toast.success(`🧩 ${cap.name} → ${label}${featureNote}`);
+      } catch {
+        toast.error("Failed to update milestone assignment");
+        // Revert capability
+        setCapabilities((prev) =>
+          prev.map((c) =>
+            c.id === itemId
+              ? {
+                  ...c,
+                  milestone_id: previousMilestoneId,
+                  milestone_title: cap.milestone_title,
+                  milestone_version_label: cap.milestone_version_label,
+                  milestone_release_type: cap.milestone_release_type,
+                  milestone_target_date: cap.milestone_target_date,
+                }
+              : c
+          )
+        );
+        // Revert features
+        if (movedFeatureIds.size > 0) {
+          setAllItems((prev) =>
+            prev.map((i) => {
+              if (!movedFeatureIds.has(i.id)) return i;
+              const original = unplannedFeatures.find((f) => f.id === i.id);
+              return original
+                ? {
+                    ...i,
+                    milestone_id: original.milestone_id,
+                    milestone_title: original.milestone_title,
+                    milestone_version_label: original.milestone_version_label,
+                    milestone_release_type: original.milestone_release_type,
+                    milestone_target_date: original.milestone_target_date,
+                  }
+                : i;
+            })
+          );
+        }
+      }
+    } else {
+      // Feature assignment
+      const item = allItems.find((i) => i.id === itemId);
+      if (!item) return;
+      const previousMilestoneId = item.milestone_id;
+
+      setAllItems((prev) =>
+        prev.map((i) =>
+          i.id === itemId
+            ? {
+                ...i,
+                milestone_id: milestoneId,
+                milestone_title: targetMs?.title ?? null,
+                milestone_version_label: targetMs?.version_label ?? null,
+                milestone_release_type: targetMs?.release_type ?? null,
+                milestone_target_date: targetMs?.target_date ?? null,
+              }
+            : i
+        )
+      );
+
+      try {
+        if (previousMilestoneId) {
+          const removeRes = await fetch(`/api/milestones/${previousMilestoneId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "remove", itemType: "feature", itemId }),
+          });
+          if (!removeRes.ok) throw new Error("Failed to remove from milestone");
+        }
+        if (milestoneId) {
+          const addRes = await fetch(`/api/milestones/${milestoneId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "add", itemType: "feature", itemId }),
+          });
+          if (!addRes.ok) throw new Error("Failed to add to milestone");
+        }
+        toast.success(`Moved to ${label}`);
+      } catch {
+        toast.error("Failed to update milestone assignment");
+        setAllItems((prev) =>
+          prev.map((i) =>
+            i.id === itemId
+              ? {
+                  ...i,
+                  milestone_id: previousMilestoneId,
+                  milestone_title: item.milestone_title,
+                  milestone_version_label: item.milestone_version_label,
+                  milestone_release_type: item.milestone_release_type,
+                  milestone_target_date: item.milestone_target_date,
+                }
+              : i
+          )
+        );
+      }
+    }
+  }, [allItems, milestones, capabilities]);
+
+  // Handle feature phase toggle (checkmark selection on capability cards)
+  const handleFeaturePhaseToggle = useCallback(async (featureId: string, milestoneId: string | null, assign: boolean) => {
+    const item = allItems.find((i) => i.id === featureId);
+    if (!item) return;
+
+    const targetMs = milestoneId ? milestones.find((m) => m.id === milestoneId) : null;
+    const label = targetMs ? (targetMs.version_label || targetMs.title) : "Unplanned";
+
+    if (assign && milestoneId) {
+      // Assign feature to milestone
+      const previousMilestoneId = item.milestone_id;
+
+      // Optimistic update
+      setAllItems((prev) =>
+        prev.map((i) =>
+          i.id === featureId
+            ? {
+                ...i,
+                milestone_id: milestoneId,
+                milestone_title: targetMs?.title ?? null,
+                milestone_version_label: targetMs?.version_label ?? null,
+                milestone_release_type: targetMs?.release_type ?? null,
+                milestone_target_date: targetMs?.target_date ?? null,
+              }
+            : i
+        )
+      );
+
+      try {
+        // Remove from old milestone if needed
+        if (previousMilestoneId) {
+          const removeRes = await fetch(`/api/milestones/${previousMilestoneId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "remove", itemType: "feature", itemId: featureId }),
+          });
+          if (!removeRes.ok) throw new Error("Failed to remove from previous milestone");
+        }
+        // Add to new milestone
+        const addRes = await fetch(`/api/milestones/${milestoneId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "add", itemType: "feature", itemId: featureId }),
+        });
+        if (!addRes.ok) throw new Error("Failed to add to milestone");
+        toast.success(`✅ ${item.title} → ${label}`);
+      } catch {
+        toast.error("Failed to assign feature to phase");
+        // Revert
+        setAllItems((prev) =>
+          prev.map((i) =>
+            i.id === featureId
+              ? {
+                  ...i,
+                  milestone_id: previousMilestoneId,
+                  milestone_title: item.milestone_title,
+                  milestone_version_label: item.milestone_version_label,
+                  milestone_release_type: item.milestone_release_type,
+                  milestone_target_date: item.milestone_target_date,
+                }
+              : i
+          )
+        );
+      }
+    } else if (!assign && item.milestone_id) {
+      // Unassign feature from milestone
+      const previousMilestoneId = item.milestone_id;
+
+      // Optimistic update
+      setAllItems((prev) =>
+        prev.map((i) =>
+          i.id === featureId
+            ? {
+                ...i,
+                milestone_id: null,
+                milestone_title: null,
+                milestone_version_label: null,
+                milestone_release_type: null,
+                milestone_target_date: null,
+              }
+            : i
+        )
+      );
+
+      try {
+        const removeRes = await fetch(`/api/milestones/${previousMilestoneId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "remove", itemType: "feature", itemId: featureId }),
+        });
+        if (!removeRes.ok) throw new Error("Failed to remove from milestone");
+        toast.success(`☐ ${item.title} removed from ${label}`);
+      } catch {
+        toast.error("Failed to remove feature from phase");
+        // Revert
+        setAllItems((prev) =>
+          prev.map((i) =>
+            i.id === featureId
+              ? {
+                  ...i,
+                  milestone_id: previousMilestoneId,
+                  milestone_title: item.milestone_title,
+                  milestone_version_label: item.milestone_version_label,
+                  milestone_release_type: item.milestone_release_type,
+                  milestone_target_date: item.milestone_target_date,
+                }
+              : i
+          )
+        );
+      }
+    }
+  }, [allItems, milestones]);
 
   return (
     <div className="flex flex-col w-full h-full overflow-hidden">
       {/* View mode tabs */}
       <div className="flex items-center border-b border-border px-4">
         <div className="flex">
-          {(["timeline", "kanban"] as ViewMode[]).map((mode) => (
+          {(["kanban", "timeline"] as ViewMode[]).map((mode) => (
             <button
               key={mode}
               type="button"
@@ -1135,11 +2007,21 @@ function RoadmapContent({ content }: { content: string }) {
       )}
 
       {/* Filter bar */}
-      <FilterBar items={allItems} filters={filters} setFilters={setFilters} />
+      <FilterBar items={allItems} milestoneOverlays={milestones} filters={filters} setFilters={setFilters} />
 
       {/* Main content */}
-      <div className="flex-1 overflow-hidden">
-        {filteredItems.length === 0 ? (
+      <div className="flex-1 min-w-0 overflow-hidden">
+        {viewMode === "kanban" ? (
+          <KanbanView
+            items={filteredItems}
+            milestones={filters.releaseType ? milestones.filter((m) => m.release_type === filters.releaseType) : milestones}
+            capabilities={capabilities}
+            onItemClick={handleItemClick}
+            onCapabilityClick={handleCapabilityClick}
+            onMilestoneAssign={handleMilestoneAssign}
+            onFeaturePhaseToggle={handleFeaturePhaseToggle}
+          />
+        ) : filteredItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <div className="text-lg mb-2">🗺️</div>
             <div className="text-sm">
@@ -1147,30 +2029,26 @@ function RoadmapContent({ content }: { content: string }) {
                 ? "No features are scheduled on the roadmap yet."
                 : "No items match your current filters."}
             </div>
-            {allItems.length > 0 && filters.capability !== null && (
+            {allItems.length > 0 && (
               <button
                 type="button"
-                onClick={() => setFilters({ capability: null, priority: null, status: null })}
+                onClick={() => setFilters({ capability: null, priority: null, status: null, milestone: null, releaseType: null })}
                 className="text-xs text-primary hover:underline mt-1"
               >
                 Clear filters
               </button>
             )}
           </div>
-        ) : viewMode === "timeline" ? (
+        ) : (
           <TimelineView
             items={filteredItems}
             zoom={zoom}
             colorBy={colorBy}
             capabilityColorMap={capabilityColorMap}
+            milestones={milestones}
             onItemClick={handleItemClick}
+            onCapabilityClick={(capId, capName) => handleCapabilityClick({ id: capId, name: capName } as CapabilityData)}
             onScheduleChange={handleScheduleChange}
-          />
-        ) : (
-          <KanbanView
-            items={filteredItems}
-            onItemClick={handleItemClick}
-            onHorizonChange={handleHorizonChange}
           />
         )}
       </div>

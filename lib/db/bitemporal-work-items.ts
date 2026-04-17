@@ -63,6 +63,30 @@ export type SdlcPhase =
 
 /** Well-known UUID for the default / local repository */
 export const DEFAULT_REPOSITORY_ID = "00000000-0000-0000-0000-000000000001";
+/** Well-known UUID for the default product (same as default repository for backward compat) */
+export const DEFAULT_PRODUCT_ID = "00000000-0000-0000-0000-000000000001";
+
+// --- Product ---
+export interface BitemporalProduct {
+  id: string;
+  version_id: string;
+  name: string;
+  description: string | null;
+  status: RepositoryStatus;
+  settings: Record<string, unknown>;
+  maintained_by: string | null;
+  valid_from: Date;
+  valid_to: Date;
+}
+
+export interface BitemporalProductSummary {
+  id: string;
+  version_id: string;
+  name: string;
+  description: string | null;
+  status: RepositoryStatus;
+  valid_from: Date;
+}
 
 // --- Repository ---
 export interface BitemporalRepository {
@@ -76,6 +100,7 @@ export interface BitemporalRepository {
   status: RepositoryStatus;
   settings: Record<string, unknown>;
   maintained_by: string | null;
+  product_id: string | null;
   valid_from: Date;
   valid_to: Date;
 }
@@ -86,6 +111,7 @@ export interface BitemporalRepositorySummary {
   name: string;
   full_name: string | null;
   status: RepositoryStatus;
+  product_id: string | null;
   valid_from: Date;
 }
 
@@ -107,9 +133,11 @@ export interface BitemporalFeature {
   maintained_by: string | null;
   maintained_by_email: string | null;
   repository_id: string;
+  product_id: string;
   planned_start: string | null;
   planned_end: string | null;
   roadmap_horizon: RoadmapHorizon | null;
+  primary_capability_id: string | null;
   valid_from: Date;
   valid_to: Date;
 }
@@ -122,9 +150,11 @@ export interface BitemporalFeatureSummary {
   status: CascadeStatus;
   priority: Priority;
   repository_id: string;
+  product_id: string;
   planned_start: string | null;
   planned_end: string | null;
   roadmap_horizon: RoadmapHorizon | null;
+  primary_capability_id: string | null;
   valid_from: Date;
 }
 
@@ -148,6 +178,7 @@ export interface BitemporalBug {
   maintained_by: string | null;
   maintained_by_email: string | null;
   repository_id: string;
+  product_id: string;
   valid_from: Date;
   valid_to: Date;
 }
@@ -160,6 +191,7 @@ export interface BitemporalBugSummary {
   status: CascadeStatus;
   priority: Priority;
   repository_id: string;
+  product_id: string;
   valid_from: Date;
 }
 
@@ -179,6 +211,7 @@ export interface BitemporalTask {
   ai_metadata: Record<string, unknown>;
   maintained_by: string | null;
   repository_id: string;
+  product_id: string;
   valid_from: Date;
   valid_to: Date;
 }
@@ -192,6 +225,7 @@ export interface BitemporalTaskSummary {
   status: TaskStatus;
   priority: Priority;
   repository_id: string;
+  product_id: string;
   valid_from: Date;
 }
 
@@ -206,6 +240,7 @@ export interface BitemporalBacklogItem {
   notes: string | null;
   maintained_by: string | null;
   repository_id: string;
+  product_id: string;
   valid_from: Date;
   valid_to: Date;
 }
@@ -231,8 +266,102 @@ export interface BitemporalItemDocumentLink {
   link_type: LinkType;
   maintained_by: string | null;
   repository_id: string;
+  product_id: string;
   valid_from: Date;
   valid_to: Date;
+}
+
+// =============================================================================
+// PRODUCT QUERIES
+// =============================================================================
+
+export async function listProducts(filters?: {
+  status?: RepositoryStatus;
+}): Promise<BitemporalProductSummary[]> {
+  try {
+    let query = `
+      SELECT DISTINCT ON (id) id, version_id, name, description, status, valid_from
+      FROM current_products
+    `;
+    const conditions: string[] = [];
+    if (filters?.status) conditions.push(`status = '${filters.status}'`);
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(" AND ")}`;
+    }
+    query += " ORDER BY id, valid_from DESC";
+    const rows = await client.unsafe(query);
+    return rows as unknown as BitemporalProductSummary[];
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to list products");
+  }
+}
+
+export async function getProductById(id: string): Promise<BitemporalProduct | null> {
+  try {
+    const rows = await client`
+      SELECT id, version_id, name, description, status, settings, maintained_by, valid_from, valid_to
+      FROM current_products
+      WHERE id = ${id}
+      ORDER BY valid_from DESC
+      LIMIT 1
+    `;
+    if (rows.length === 0) return null;
+    return rows[0] as unknown as BitemporalProduct;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to get product by id");
+  }
+}
+
+export async function createProduct(params: {
+  id: string;
+  name: string;
+  description?: string;
+  status?: RepositoryStatus;
+  settings?: Record<string, unknown>;
+  maintainedBy?: string;
+}): Promise<string> {
+  try {
+    const rows = await client`
+      SELECT insert_product_version(
+        ${params.id}::uuid,
+        ${params.name}::varchar,
+        ${params.description ?? null}::text,
+        ${params.status ?? "active"}::varchar,
+        ${JSON.stringify(params.settings ?? {})}::jsonb,
+        ${new Date()}::timestamptz,
+        ${params.maintainedBy ?? null}::uuid
+      ) AS version_id
+    `;
+    return rows[0].version_id as string;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to create product");
+  }
+}
+
+export async function updateProduct(params: {
+  id: string;
+  name?: string;
+  description?: string;
+  status?: RepositoryStatus;
+  settings?: Record<string, unknown>;
+  maintainedBy?: string;
+}): Promise<string> {
+  try {
+    const rows = await client`
+      SELECT update_product_version(
+        ${params.id}::uuid,
+        ${params.name ?? null}::varchar,
+        ${params.description ?? null}::text,
+        ${params.status ?? null}::varchar,
+        ${params.settings ? JSON.stringify(params.settings) : null}::jsonb,
+        ${new Date()}::timestamptz,
+        ${params.maintainedBy ?? null}::uuid
+      ) AS version_id
+    `;
+    return rows[0].version_id as string;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to update product");
+  }
 }
 
 // =============================================================================
@@ -351,10 +480,11 @@ export async function listFeatures(filters?: {
   featureType?: FeatureType;
   parentId?: string;
   repositoryId?: string;
+  productId?: string;
 }): Promise<BitemporalFeatureSummary[]> {
   try {
     let query = `
-      SELECT DISTINCT ON (id) id, version_id, title, feature_type, status, priority, repository_id, valid_from
+      SELECT DISTINCT ON (id) id, version_id, title, feature_type, status, priority, repository_id, product_id, valid_from
       FROM current_features
     `;
     const conditions: string[] = [];
@@ -362,7 +492,8 @@ export async function listFeatures(filters?: {
     if (filters?.priority) conditions.push(`priority = '${filters.priority}'`);
     if (filters?.featureType) conditions.push(`feature_type = '${filters.featureType}'`);
     if (filters?.parentId) conditions.push(`parent_id = '${filters.parentId}'`);
-    if (filters?.repositoryId) conditions.push(`repository_id = '${filters.repositoryId}'`);
+    if (filters?.productId) conditions.push(`product_id = '${filters.productId}'`);
+    else if (filters?.repositoryId) conditions.push(`repository_id = '${filters.repositoryId}'`);
 
     if (conditions.length > 0) {
       query += ` WHERE ${conditions.join(" AND ")}`;
@@ -392,11 +523,18 @@ export interface RoadmapItem {
   planned_end: string | null;
   roadmap_horizon: RoadmapHorizon | null;
   parent_id: string | null;
+  primary_capability_id: string | null;
   capability_name: string | null;
   capability_id: string | null;
   task_total: number;
   task_done: number;
   repository_id: string;
+  product_id: string;
+  milestone_id: string | null;
+  milestone_title: string | null;
+  milestone_version_label: string | null;
+  milestone_release_type: ReleaseType | null;
+  milestone_target_date: string | null;
 }
 
 export async function getRoadmapItems(filters?: {
@@ -405,30 +543,39 @@ export async function getRoadmapItems(filters?: {
   status?: CascadeStatus;
   horizon?: RoadmapHorizon;
   repositoryId?: string;
+  productId?: string;
 }): Promise<RoadmapItem[]> {
   try {
     let query = `
       SELECT DISTINCT ON (f.id)
         f.id, f.version_id, f.title, f.feature_type, f.status, f.priority,
         f.effort_estimate, f.planned_start, f.planned_end, f.roadmap_horizon,
-        f.parent_id, f.repository_id,
+        f.parent_id, f.repository_id, f.primary_capability_id,
         c.name AS capability_name,
         c.id AS capability_id,
         (SELECT COUNT(*)::int FROM current_tasks t WHERE t.parent_id = f.id AND t.valid_to = 'infinity') AS task_total,
-        (SELECT COUNT(*)::int FROM current_tasks t WHERE t.parent_id = f.id AND t.valid_to = 'infinity' AND t.status = 'done') AS task_done
+        (SELECT COUNT(*)::int FROM current_tasks t WHERE t.parent_id = f.id AND t.valid_to = 'infinity' AND t.status = 'done') AS task_done,
+        ms.id AS milestone_id,
+        ms.title AS milestone_title,
+        ms.version_label AS milestone_version_label,
+        ms.release_type AS milestone_release_type,
+        ms.target_date AS milestone_target_date
       FROM current_features f
       LEFT JOIN current_capability_items ci ON ci.item_id = f.id AND ci.item_type = 'feature' AND ci.valid_to = 'infinity'
       LEFT JOIN current_capabilities c ON c.id = ci.capability_id AND c.valid_to = 'infinity'
+      LEFT JOIN milestone_items mi_f ON mi_f.item_id = f.id AND mi_f.item_type = 'feature'
+      LEFT JOIN current_milestones ms ON ms.id = mi_f.milestone_id
       WHERE f.valid_to = 'infinity'
         AND f.feature_type = 'feature'
         AND f.status NOT IN ('rejected')
     `;
     const conditions: string[] = [];
-    if (filters?.capabilityId) conditions.push(`c.id = '${filters.capabilityId}'`);
+    if (filters?.capabilityId) conditions.push(`(f.primary_capability_id = '${filters.capabilityId}' OR c.id = '${filters.capabilityId}')`);
     if (filters?.priority) conditions.push(`f.priority = '${filters.priority}'`);
     if (filters?.status) conditions.push(`f.status = '${filters.status}'`);
     if (filters?.horizon) conditions.push(`f.roadmap_horizon = '${filters.horizon}'`);
-    if (filters?.repositoryId) conditions.push(`f.repository_id = '${filters.repositoryId}'`);
+    if (filters?.productId) conditions.push(`f.product_id = '${filters.productId}'`);
+    else if (filters?.repositoryId) conditions.push(`f.repository_id = '${filters.repositoryId}'`);
 
     if (conditions.length > 0) {
       query += ` AND ${conditions.join(" AND ")}`;
@@ -577,6 +724,7 @@ export async function createFeature(params: {
   aiMetadata?: Record<string, unknown>;
   maintainedBy?: string;
   repositoryId?: string;
+  productId?: string;
 }): Promise<string> {
   try {
     const rows = await client`
@@ -601,6 +749,9 @@ export async function createFeature(params: {
     if (params.repositoryId) {
       await client`UPDATE features SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
     }
+    if (params.productId) {
+      await client`UPDATE features SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
+    }
     return versionId;
   } catch (_error) {
     throw new ChatSDKError("bad_request:database", "Failed to create feature");
@@ -623,6 +774,7 @@ export async function updateFeature(params: {
   plannedStart?: string | null;
   plannedEnd?: string | null;
   roadmapHorizon?: RoadmapHorizon | null;
+  primaryCapabilityId?: string | null;
 }): Promise<string> {
   try {
     const rows = await client`
@@ -643,7 +795,8 @@ export async function updateFeature(params: {
         ${null}::uuid,
         ${params.plannedStart ?? null}::timestamptz,
         ${params.plannedEnd ?? null}::timestamptz,
-        ${params.roadmapHorizon ?? null}::varchar
+        ${params.roadmapHorizon ?? null}::varchar,
+        ${params.primaryCapabilityId ?? null}::uuid
       ) AS version_id
     `;
     return rows[0].version_id as string;
@@ -661,17 +814,19 @@ export async function listBugs(filters?: {
   priority?: Priority;
   severity?: BugSeverity;
   repositoryId?: string;
+  productId?: string;
 }): Promise<BitemporalBugSummary[]> {
   try {
     let query = `
-      SELECT DISTINCT ON (id) id, version_id, title, severity, status, priority, repository_id, valid_from
+      SELECT DISTINCT ON (id) id, version_id, title, severity, status, priority, repository_id, product_id, valid_from
       FROM current_bugs
     `;
     const conditions: string[] = [];
     if (filters?.status) conditions.push(`status = '${filters.status}'`);
     if (filters?.priority) conditions.push(`priority = '${filters.priority}'`);
     if (filters?.severity) conditions.push(`severity = '${filters.severity}'`);
-    if (filters?.repositoryId) conditions.push(`repository_id = '${filters.repositoryId}'`);
+    if (filters?.productId) conditions.push(`product_id = '${filters.productId}'`);
+    else if (filters?.repositoryId) conditions.push(`repository_id = '${filters.repositoryId}'`);
 
     if (conditions.length > 0) {
       query += ` WHERE ${conditions.join(" AND ")}`;
@@ -740,6 +895,7 @@ export async function createBug(params: {
   aiMetadata?: Record<string, unknown>;
   maintainedBy?: string;
   repositoryId?: string;
+  productId?: string;
 }): Promise<string> {
   try {
     const rows = await client`
@@ -765,6 +921,9 @@ export async function createBug(params: {
     const versionId = rows[0].version_id as string;
     if (params.repositoryId) {
       await client`UPDATE bugs SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
+    }
+    if (params.productId) {
+      await client`UPDATE bugs SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
     }
     return versionId;
   } catch (_error) {
@@ -865,17 +1024,19 @@ export async function listTasks(filters?: {
   parentId?: string;
   status?: TaskStatus;
   repositoryId?: string;
+  productId?: string;
 }): Promise<BitemporalTaskSummary[]> {
   try {
     let query = `
-      SELECT DISTINCT ON (id) id, version_id, title, parent_type, parent_id, status, priority, repository_id, valid_from
+      SELECT DISTINCT ON (id) id, version_id, title, parent_type, parent_id, status, priority, repository_id, product_id, valid_from
       FROM current_tasks
     `;
     const conditions: string[] = [];
     if (filters?.parentType) conditions.push(`parent_type = '${filters.parentType}'`);
     if (filters?.parentId) conditions.push(`parent_id = '${filters.parentId}'`);
     if (filters?.status) conditions.push(`status = '${filters.status}'`);
-    if (filters?.repositoryId) conditions.push(`repository_id = '${filters.repositoryId}'`);
+    if (filters?.productId) conditions.push(`product_id = '${filters.productId}'`);
+    else if (filters?.repositoryId) conditions.push(`repository_id = '${filters.repositoryId}'`);
 
     if (conditions.length > 0) {
       query += ` WHERE ${conditions.join(" AND ")}`;
@@ -920,6 +1081,7 @@ export async function createTask(params: {
   aiMetadata?: Record<string, unknown>;
   maintainedBy?: string;
   repositoryId?: string;
+  productId?: string;
 }): Promise<string> {
   try {
     const rows = await client`
@@ -942,6 +1104,9 @@ export async function createTask(params: {
     const versionId = rows[0].version_id as string;
     if (params.repositoryId) {
       await client`UPDATE tasks SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
+    }
+    if (params.productId) {
+      await client`UPDATE tasks SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
     }
     return versionId;
   } catch (_error) {
@@ -991,6 +1156,7 @@ export async function getBacklog(filters?: {
   sprintLabel?: string;
   itemType?: "feature" | "bug";
   repositoryId?: string;
+  productId?: string;
 }): Promise<BacklogItemWithDetails[]> {
   try {
     let query = `
@@ -1046,7 +1212,8 @@ export async function getBacklog(filters?: {
     const conditions: string[] = [];
     if (filters?.sprintLabel) conditions.push(`bi.sprint_label = '${filters.sprintLabel}'`);
     if (filters?.itemType) conditions.push(`bi.item_type = '${filters.itemType}'`);
-    if (filters?.repositoryId) conditions.push(`bi.repository_id = '${filters.repositoryId}'`);
+    if (filters?.productId) conditions.push(`bi.product_id = '${filters.productId}'`);
+    else if (filters?.repositoryId) conditions.push(`bi.repository_id = '${filters.repositoryId}'`);
 
     if (conditions.length > 0) {
       query += ` AND ${conditions.join(" AND ")}`;
@@ -1334,6 +1501,7 @@ export interface BitemporalCapability {
   sort_order: number;
   status: CapabilityStatus;
   maintained_by: string | null;
+  product_id: string | null;
   valid_from: Date;
   valid_to: Date;
 }
@@ -1344,9 +1512,18 @@ export interface BitemporalCapabilitySummary {
   sdlc_phase: SdlcPhase;
   sort_order: number;
   status: CapabilityStatus;
+  priority: string | null;
+  planned_start: string | null;
+  planned_end: string | null;
+  roadmap_horizon: "now" | "next" | "later" | null;
   feature_count: number;
   bug_count: number;
   task_count: number;
+  milestone_id: string | null;
+  milestone_title: string | null;
+  milestone_version_label: string | null;
+  milestone_release_type: "major" | "minor" | null;
+  milestone_target_date: string | null;
 }
 
 export interface BitemporalCapabilityItem {
@@ -1363,25 +1540,51 @@ export interface BitemporalCapabilityItem {
 export async function listCapabilities(filters?: {
   status?: CapabilityStatus;
   sdlc_phase?: SdlcPhase;
+  repositoryId?: string;
+  productId?: string;
 }): Promise<BitemporalCapabilitySummary[]> {
   try {
     const conditions: string[] = ["c.valid_to = 'infinity'"];
     if (filters?.status) conditions.push(`c.status = '${filters.status}'`);
     if (filters?.sdlc_phase) conditions.push(`c.sdlc_phase = '${filters.sdlc_phase}'`);
 
-    const rows = await client`
+    // When filtering by product, filter directly on product_id
+    if (filters?.productId) {
+      conditions.push(`c.product_id = '${filters.productId}'`);
+    } else if (filters?.repositoryId) {
+      // Legacy: filter by repository through items
+      conditions.push(`EXISTS (
+        SELECT 1 FROM current_capability_items ci_r
+        LEFT JOIN current_features f_r ON ci_r.item_id = f_r.id AND ci_r.item_type = 'feature' AND f_r.valid_to = 'infinity'
+        LEFT JOIN current_bugs b_r ON ci_r.item_id = b_r.id AND ci_r.item_type = 'bug' AND b_r.valid_to = 'infinity'
+        WHERE ci_r.valid_to = 'infinity' AND ci_r.capability_id = c.id
+          AND (f_r.repository_id = '${filters.repositoryId}' OR b_r.repository_id = '${filters.repositoryId}')
+      )`);
+    }
+
+    const rows = await client.unsafe(`
       SELECT
         c.id, c.name, c.sdlc_phase, c.sort_order, c.status,
+        c.priority, c.planned_start, c.planned_end, c.roadmap_horizon,
         COALESCE(SUM(CASE WHEN ci.item_type = 'feature' THEN 1 ELSE 0 END), 0)::int AS feature_count,
         COALESCE(SUM(CASE WHEN ci.item_type = 'bug' THEN 1 ELSE 0 END), 0)::int AS bug_count,
-        COALESCE(SUM(CASE WHEN ci.item_type = 'task' THEN 1 ELSE 0 END), 0)::int AS task_count
+        COALESCE(SUM(CASE WHEN ci.item_type = 'task' THEN 1 ELSE 0 END), 0)::int AS task_count,
+        ms.id AS milestone_id,
+        ms.title AS milestone_title,
+        ms.version_label AS milestone_version_label,
+        ms.release_type AS milestone_release_type,
+        ms.target_date AS milestone_target_date
       FROM current_capabilities c
       LEFT JOIN current_capability_items ci
         ON ci.capability_id = c.id AND ci.valid_to = 'infinity'
-      WHERE ${client.unsafe(conditions.join(" AND "))}
-      GROUP BY c.id, c.name, c.sdlc_phase, c.sort_order, c.status
+      LEFT JOIN milestone_items mi_c ON mi_c.item_id = c.id AND mi_c.item_type = 'capability'
+      LEFT JOIN current_milestones ms ON ms.id = mi_c.milestone_id
+      WHERE ${conditions.join(" AND ")}
+      GROUP BY c.id, c.name, c.sdlc_phase, c.sort_order, c.status,
+               c.priority, c.planned_start, c.planned_end, c.roadmap_horizon,
+               ms.id, ms.title, ms.version_label, ms.release_type, ms.target_date
       ORDER BY c.sort_order ASC
-    `;
+    `);
     return rows as unknown as BitemporalCapabilitySummary[];
   } catch (_error) {
     throw new ChatSDKError("bad_request:database", "Failed to list capabilities");
@@ -1537,5 +1740,316 @@ export async function getCapabilityItemsMap(
     return map;
   } catch (_error) {
     throw new ChatSDKError("bad_request:database", "Failed to get capability items map");
+  }
+}
+
+// =============================================================================
+// MILESTONES
+// =============================================================================
+
+export type ReleaseType = "major" | "minor";
+
+export interface BitemporalMilestone {
+  id: string;
+  version_id: string;
+  title: string;
+  description: string | null;
+  version_label: string | null;
+  target_date: string | null;
+  start_date: string | null;
+  status: MilestoneStatus;
+  capacity_limit: number | null;
+  capacity_unit: string | null;
+  tags: string[];
+  ai_metadata: Record<string, unknown>;
+  maintained_by: string | null;
+  repository_id: string | null;
+  product_id: string | null;
+  release_type: ReleaseType;
+  release_sequence: number;
+  valid_from: Date;
+  valid_to: Date;
+}
+
+export interface BitemporalMilestoneSummary {
+  id: string;
+  version_id: string;
+  title: string;
+  version_label: string | null;
+  target_date: string | null;
+  start_date: string | null;
+  status: MilestoneStatus;
+  capacity_limit: number | null;
+  repository_id: string | null;
+  product_id: string | null;
+  release_type: ReleaseType;
+  release_sequence: number;
+  valid_from: Date;
+}
+
+export interface MilestoneWithProgress extends BitemporalMilestone {
+  item_count: number;
+  done_count: number;
+  completion_pct: number;
+}
+
+export interface MilestoneItem {
+  id: string;
+  milestone_id: string;
+  item_type: "feature" | "bug" | "capability";
+  item_id: string;
+  added_at: Date;
+  added_by: string | null;
+  item_title?: string;
+  item_status?: string;
+  item_priority?: string;
+}
+
+export async function listMilestones(filters?: {
+  status?: MilestoneStatus;
+  repositoryId?: string;
+  productId?: string;
+  releaseType?: ReleaseType;
+}): Promise<MilestoneWithProgress[]> {
+  try {
+    const conditions: string[] = [];
+    if (filters?.status) conditions.push(`m.status = '${filters.status}'`);
+    if (filters?.productId) conditions.push(`m.product_id = '${filters.productId}'`);
+    else if (filters?.repositoryId) conditions.push(`m.repository_id = '${filters.repositoryId}'`);
+    if (filters?.releaseType) conditions.push(`m.release_type = '${filters.releaseType}'`);
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const rows = await client.unsafe(`
+      SELECT DISTINCT ON (m.id)
+        m.id, m.version_id, m.title, m.description, m.version_label,
+        m.target_date, m.start_date, m.status, m.capacity_limit, m.capacity_unit,
+        m.tags, m.ai_metadata, m.maintained_by, m.repository_id,
+        m.release_type, m.release_sequence,
+        m.valid_from, m.valid_to,
+        COALESCE(counts.item_count, 0) AS item_count,
+        COALESCE(counts.done_count, 0) AS done_count,
+        CASE WHEN COALESCE(counts.item_count, 0) = 0 THEN 0
+             ELSE ROUND(COALESCE(counts.done_count, 0)::numeric / counts.item_count * 100)
+        END AS completion_pct
+      FROM current_milestones m
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*) AS item_count,
+          COUNT(*) FILTER (WHERE
+            CASE
+              WHEN mi.item_type = 'feature' THEN (SELECT f.status FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1) = 'done'
+              WHEN mi.item_type = 'bug' THEN (SELECT b.status FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1) = 'done'
+              WHEN mi.item_type = 'capability' THEN (SELECT c.status FROM current_capabilities c WHERE c.id = mi.item_id LIMIT 1) = 'archived'
+              ELSE false
+            END
+          ) AS done_count
+        FROM milestone_items mi
+        WHERE mi.milestone_id = m.id
+      ) counts ON true
+      ${whereClause}
+      ORDER BY m.id, m.valid_from DESC
+    `);
+    return rows as unknown as MilestoneWithProgress[];
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to list milestones");
+  }
+}
+
+export async function getMilestoneById(id: string): Promise<MilestoneWithProgress | null> {
+  try {
+    const rows = await client`
+      SELECT
+        m.id, m.version_id, m.title, m.description, m.version_label,
+        m.target_date, m.start_date, m.status, m.capacity_limit, m.capacity_unit,
+        m.tags, m.ai_metadata, m.maintained_by, m.repository_id,
+        m.release_type, m.release_sequence,
+        m.valid_from, m.valid_to,
+        COALESCE(counts.item_count, 0) AS item_count,
+        COALESCE(counts.done_count, 0) AS done_count,
+        CASE WHEN COALESCE(counts.item_count, 0) = 0 THEN 0
+             ELSE ROUND(COALESCE(counts.done_count, 0)::numeric / counts.item_count * 100)
+        END AS completion_pct
+      FROM current_milestones m
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*) AS item_count,
+          COUNT(*) FILTER (WHERE
+            CASE
+              WHEN mi.item_type = 'feature' THEN (SELECT f.status FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1) = 'done'
+              WHEN mi.item_type = 'bug' THEN (SELECT b.status FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1) = 'done'
+              WHEN mi.item_type = 'capability' THEN (SELECT c.status FROM current_capabilities c WHERE c.id = mi.item_id LIMIT 1) = 'archived'
+              ELSE false
+            END
+          ) AS done_count
+        FROM milestone_items mi
+        WHERE mi.milestone_id = m.id
+      ) counts ON true
+      WHERE m.id = ${id}
+      ORDER BY m.valid_from DESC
+      LIMIT 1
+    `;
+    if (rows.length === 0) return null;
+    return rows[0] as unknown as MilestoneWithProgress;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to get milestone by id");
+  }
+}
+
+export async function createMilestone(params: {
+  id: string;
+  title: string;
+  description?: string;
+  versionLabel?: string;
+  targetDate?: string;
+  startDate?: string;
+  status?: MilestoneStatus;
+  capacityLimit?: number;
+  capacityUnit?: string;
+  tags?: string[];
+  aiMetadata?: Record<string, unknown>;
+  maintainedBy?: string;
+  repositoryId?: string;
+  productId?: string;
+  releaseType?: ReleaseType;
+  releaseSequence?: number;
+}): Promise<string> {
+  try {
+    const rows = await client`
+      SELECT insert_milestone_version(
+        ${params.id}::uuid,
+        ${params.title}::varchar,
+        ${params.description ?? null}::text,
+        ${params.versionLabel ?? null}::varchar,
+        ${params.targetDate ?? null}::date,
+        ${params.startDate ?? null}::date,
+        ${params.status ?? "planning"}::varchar,
+        ${params.capacityLimit ?? null}::integer,
+        ${params.capacityUnit ?? "items"}::varchar,
+        ${toJsonbString(params.tags, "[]")}::jsonb,
+        ${toJsonbString(params.aiMetadata)}::jsonb,
+        ${new Date()}::timestamptz,
+        ${params.maintainedBy ?? null}::uuid,
+        ${params.repositoryId ?? null}::uuid,
+        ${params.releaseType ?? "minor"}::varchar,
+        ${params.releaseSequence ?? 0}::integer
+      ) AS version_id
+    `;
+    const versionId = rows[0].version_id as string;
+    if (params.productId) {
+      await client`UPDATE milestones SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
+    }
+    return versionId;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to create milestone");
+  }
+}
+
+export async function updateMilestone(params: {
+  id: string;
+  title?: string;
+  description?: string;
+  versionLabel?: string;
+  targetDate?: string;
+  startDate?: string;
+  status?: MilestoneStatus;
+  capacityLimit?: number;
+  capacityUnit?: string;
+  tags?: string[];
+  aiMetadata?: Record<string, unknown>;
+  maintainedBy?: string;
+  releaseType?: ReleaseType;
+  releaseSequence?: number;
+}): Promise<string> {
+  try {
+    const rows = await client`
+      SELECT update_milestone_version(
+        ${params.id}::uuid,
+        ${params.title ?? null}::varchar,
+        ${params.description ?? null}::text,
+        ${params.versionLabel ?? null}::varchar,
+        ${params.targetDate ?? null}::date,
+        ${params.startDate ?? null}::date,
+        ${params.status ?? null}::varchar,
+        ${params.capacityLimit ?? null}::integer,
+        ${params.capacityUnit ?? null}::varchar,
+        ${params.tags ? toJsonbString(params.tags, "[]") : null}::jsonb,
+        ${params.aiMetadata ? toJsonbString(params.aiMetadata) : null}::jsonb,
+        ${new Date()}::timestamptz,
+        ${params.maintainedBy ?? null}::uuid,
+        ${params.releaseType ?? null}::varchar,
+        ${params.releaseSequence ?? null}::integer
+      ) AS version_id
+    `;
+    return rows[0].version_id as string;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to update milestone");
+  }
+}
+
+export async function getMilestoneItems(milestoneId: string): Promise<MilestoneItem[]> {
+  try {
+    const rows = await client`
+      SELECT mi.id, mi.milestone_id, mi.item_type, mi.item_id, mi.added_at, mi.added_by,
+        CASE
+          WHEN mi.item_type = 'feature' THEN (SELECT f.title FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'bug' THEN (SELECT b.title FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'capability' THEN (SELECT c.name FROM current_capabilities c WHERE c.id = mi.item_id LIMIT 1)
+        END AS item_title,
+        CASE
+          WHEN mi.item_type = 'feature' THEN (SELECT f.status FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'bug' THEN (SELECT b.status FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'capability' THEN (SELECT c.status FROM current_capabilities c WHERE c.id = mi.item_id LIMIT 1)
+        END AS item_status,
+        CASE
+          WHEN mi.item_type = 'feature' THEN (SELECT f.priority FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'bug' THEN (SELECT b.priority FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'capability' THEN NULL
+        END AS item_priority
+      FROM milestone_items mi
+      WHERE mi.milestone_id = ${milestoneId}
+      ORDER BY mi.item_type, mi.added_at
+    `;
+    return rows as unknown as MilestoneItem[];
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to get milestone items");
+  }
+}
+
+export async function addMilestoneItem(params: {
+  milestoneId: string;
+  itemType: "feature" | "bug" | "capability";
+  itemId: string;
+  addedBy?: string;
+  repositoryId?: string;
+  productId?: string;
+}): Promise<string> {
+  try {
+    const rows = await client`
+      INSERT INTO milestone_items (milestone_id, item_type, item_id, added_by, repository_id, product_id)
+      VALUES (${params.milestoneId}::uuid, ${params.itemType}::varchar, ${params.itemId}::uuid, ${params.addedBy ?? null}::uuid, ${params.repositoryId ?? null}::uuid, ${params.productId ?? null}::uuid)
+      ON CONFLICT (milestone_id, item_type, item_id) DO NOTHING
+      RETURNING id
+    `;
+    return rows.length > 0 ? (rows[0].id as string) : "";
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to add milestone item");
+  }
+}
+
+export async function removeMilestoneItem(params: {
+  milestoneId: string;
+  itemType: "feature" | "bug" | "capability";
+  itemId: string;
+}): Promise<void> {
+  try {
+    await client`
+      DELETE FROM milestone_items
+      WHERE milestone_id = ${params.milestoneId}::uuid
+        AND item_type = ${params.itemType}::varchar
+        AND item_id = ${params.itemId}::uuid
+    `;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to remove milestone item");
   }
 }

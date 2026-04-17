@@ -37,9 +37,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useSWRConfig } from "swr";
 import useSWR from "swr";
-import type { UIArtifact } from "@/components/artifact";
+import { useArtifactStack } from "@/hooks/use-artifact";
 import { CapabilityFilter } from "@/components/capability-picker";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -693,7 +692,7 @@ function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }
   const [activeId, setActiveId] = useState<string | null>(null);
   const [groupByCapability, setGroupByCapability] = useState(true);
   const [capabilityFilter, setCapabilityFilter] = useState<string[]>([]);
-  const { mutate } = useSWRConfig();
+  const { push } = useArtifactStack();
 
   // Fetch capabilities list (for grouping swim lanes)
   const { data: capabilities } = useSWR<{ id: string; name: string; sdlc_phase: string }[]>(
@@ -748,18 +747,13 @@ function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }
   /** Open the feature/bug detail artifact view */
   const handleOpenDetail = useCallback(
     (item: BacklogItemData) => {
-      const next: UIArtifact = {
+      push({
         documentId: item.item_id,
         kind: item.item_type as "feature" | "bug",
         title: item.item_title ?? "",
-        content: "",
-        isVisible: true,
-        status: "idle",
-        boundingBox: { top: 0, left: 0, width: 0, height: 0 },
-      };
-      mutate("artifact", next, { revalidate: false });
+      });
     },
-    [mutate]
+    [push]
   );
 
   const sensors = useSensors(
@@ -1031,7 +1025,7 @@ function BacklogKanbanView({ items: initialItems }: { items: BacklogItemData[] }
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-3 p-4 overflow-x-auto overflow-y-hidden flex-1">
+        <div className="flex gap-3 p-4 overflow-x-auto overflow-y-hidden flex-1 min-w-0">
           {KANBAN_COLUMNS.map((col) => (
             <KanbanColumn
               key={col.id}
@@ -1082,7 +1076,7 @@ function BacklogContentWithRepo({
   // Re-fetch backlog when selected repository changes (and on mount)
   useEffect(() => {
     const repoParam = selectedRepositoryId
-      ? `?repositoryId=${selectedRepositoryId}`
+      ? `?productId=${selectedRepositoryId}`
       : "";
     fetch(`/api/backlog${repoParam}`)
       .then((res) => (res.ok ? res.json() : []))

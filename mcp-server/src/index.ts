@@ -40,6 +40,14 @@ import {
   removeItemFromCapability,
   getCapabilityItems,
   getItemCapabilities,
+  listMilestones,
+  getMilestoneById,
+  createMilestone,
+  updateMilestone,
+  deleteMilestone,
+  getMilestoneItems,
+  addMilestoneItem,
+  removeMilestoneItem,
 } from "./db.js";
 import { generateAIText } from "./ai.js";
 
@@ -634,6 +642,109 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             item_id: { type: "string", description: "Item UUID" },
           },
           required: ["item_type", "item_id"],
+        },
+      },
+
+      // ── Milestone Tools ─────────────────────────────────────
+      {
+        name: "list_milestones",
+        description: "List release milestones, optionally filtered by status, release type, or repository.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            status: { type: "string", description: "Filter by milestone status: planning, active, frozen, released, archived" },
+            release_type: { type: "string", description: "Filter by release type: major or minor" },
+            repository_id: { type: "string", description: "Filter by repository UUID" },
+          },
+        },
+      },
+      {
+        name: "read_milestone",
+        description: "Read full details of a milestone by ID, including assigned items.",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "Milestone UUID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "create_milestone",
+        description: "Create a new milestone or release entry.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Milestone title" },
+            description: { type: "string", description: "Milestone description" },
+            version_label: { type: "string", description: "Version label such as V2.0 or P20260415" },
+            target_date: { type: "string", description: "Target date in YYYY-MM-DD format" },
+            start_date: { type: "string", description: "Start date in YYYY-MM-DD format" },
+            status: { type: "string", description: "planning, active, frozen, released, archived" },
+            capacity_limit: { type: "number", description: "Capacity for this release" },
+            capacity_unit: { type: "string", description: "items or story_points" },
+            tags: { type: "array", items: { type: "string" }, description: "Tags" },
+            repository_id: { type: "string", description: "Repository UUID" },
+            release_type: { type: "string", description: "major or minor" },
+            release_sequence: { type: "number", description: "Ordering in the release plan" },
+          },
+          required: ["title"],
+        },
+      },
+      {
+        name: "update_milestone",
+        description: "Update fields on an existing milestone.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Milestone UUID" },
+            title: { type: "string", description: "New title" },
+            description: { type: "string", description: "New description" },
+            version_label: { type: "string", description: "New version label" },
+            target_date: { type: "string", description: "Target date in YYYY-MM-DD format" },
+            start_date: { type: "string", description: "Start date in YYYY-MM-DD format" },
+            status: { type: "string", description: "planning, active, frozen, released, archived" },
+            capacity_limit: { type: "number", description: "Updated capacity" },
+            capacity_unit: { type: "string", description: "items or story_points" },
+            tags: { type: "array", items: { type: "string" }, description: "Updated tags" },
+            release_type: { type: "string", description: "major or minor" },
+            release_sequence: { type: "number", description: "Ordering in the release plan" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "delete_milestone",
+        description: "Delete a milestone and its item assignments.",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "Milestone UUID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "add_milestone_item",
+        description: "Assign a feature, bug, or capability to a milestone.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            milestone_id: { type: "string", description: "Milestone UUID" },
+            item_type: { type: "string", description: "feature, bug, or capability" },
+            item_id: { type: "string", description: "Item UUID" },
+            repository_id: { type: "string", description: "Optional repository UUID" },
+          },
+          required: ["milestone_id", "item_type", "item_id"],
+        },
+      },
+      {
+        name: "remove_milestone_item",
+        description: "Remove a feature, bug, or capability assignment from a milestone.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            milestone_id: { type: "string", description: "Milestone UUID" },
+            item_type: { type: "string", description: "feature, bug, or capability" },
+            item_id: { type: "string", description: "Item UUID" },
+          },
+          required: ["milestone_id", "item_type", "item_id"],
         },
       },
 
@@ -1529,6 +1640,133 @@ Output ONLY valid JSON.`,
       }
       const caps = await getItemCapabilities(args.item_type, args.item_id);
       return { content: [{ type: "text", text: JSON.stringify(caps, null, 2) }] };
+    }
+
+    // ── Milestone Handlers ─────────────────────────────────
+
+    if (name === "list_milestones") {
+      const milestones = await listMilestones({
+        status: args.status,
+        releaseType: args.release_type,
+        repositoryId: args.repository_id,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(milestones, null, 2) }] };
+    }
+
+    if (name === "read_milestone") {
+      if (!args.id) throw new Error("id is required");
+      const milestone = await getMilestoneById(args.id);
+      if (!milestone) return { content: [{ type: "text", text: "Milestone not found." }] };
+      const items = await getMilestoneItems(args.id);
+      return { content: [{ type: "text", text: JSON.stringify({ ...milestone, items }, null, 2) }] };
+    }
+
+    if (name === "create_milestone") {
+      if (!args.title) throw new Error("title is required");
+
+      if (args.target_date && args.release_type) {
+        const oppositeType = args.release_type === "major" ? "minor" : "major";
+        const existing = await listMilestones({ releaseType: oppositeType });
+        const hasConflict = existing.some((m: any) =>
+          m.target_date && String(m.target_date).slice(0, 10) === String(args.target_date).slice(0, 10)
+        );
+        if (hasConflict) {
+          throw new Error(`A ${oppositeType} release already exists on ${args.target_date}. Use a different date.`);
+        }
+      }
+
+      const id = crypto.randomUUID();
+      const versionId = await createMilestone({
+        id,
+        title: args.title,
+        description: args.description,
+        versionLabel: args.version_label,
+        targetDate: args.target_date,
+        startDate: args.start_date,
+        status: args.status,
+        capacityLimit: args.capacity_limit,
+        capacityUnit: args.capacity_unit,
+        tags: args.tags,
+        repositoryId: args.repository_id,
+        releaseType: args.release_type,
+        releaseSequence: args.release_sequence,
+        maintainedBy: MCP_ASSISTANT_USER_ID,
+      });
+      const milestone = await getMilestoneById(id);
+      return { content: [{ type: "text", text: JSON.stringify({ created: true, id, versionId, milestone }, null, 2) }] };
+    }
+
+    if (name === "update_milestone") {
+      if (!args.id) throw new Error("id is required");
+
+      const currentMilestone = await getMilestoneById(args.id);
+      if (!currentMilestone) throw new Error("Milestone not found");
+
+      const nextTargetDate = args.target_date ?? currentMilestone.target_date;
+      const nextReleaseType = args.release_type ?? currentMilestone.release_type;
+
+      if (nextTargetDate && nextReleaseType) {
+        const oppositeType = nextReleaseType === "major" ? "minor" : "major";
+        const existing = await listMilestones({ releaseType: oppositeType });
+        const hasConflict = existing.some((m: any) =>
+          m.id !== args.id &&
+          m.target_date &&
+          String(m.target_date).slice(0, 10) === String(nextTargetDate).slice(0, 10)
+        );
+        if (hasConflict) {
+          throw new Error(`A ${oppositeType} release already exists on ${String(nextTargetDate).slice(0, 10)}. Use a different date.`);
+        }
+      }
+
+      const versionId = await updateMilestone({
+        id: args.id,
+        title: args.title,
+        description: args.description,
+        versionLabel: args.version_label,
+        targetDate: args.target_date,
+        startDate: args.start_date,
+        status: args.status,
+        capacityLimit: args.capacity_limit,
+        capacityUnit: args.capacity_unit,
+        tags: args.tags,
+        releaseType: args.release_type,
+        releaseSequence: args.release_sequence,
+        maintainedBy: MCP_ASSISTANT_USER_ID,
+      });
+      const milestone = await getMilestoneById(args.id);
+      return { content: [{ type: "text", text: JSON.stringify({ updated: true, versionId, milestone }, null, 2) }] };
+    }
+
+    if (name === "delete_milestone") {
+      if (!args.id) throw new Error("id is required");
+      await deleteMilestone(args.id);
+      return { content: [{ type: "text", text: JSON.stringify({ deleted: true, id: args.id }, null, 2) }] };
+    }
+
+    if (name === "add_milestone_item") {
+      if (!args.milestone_id || !args.item_type || !args.item_id) {
+        throw new Error("milestone_id, item_type, and item_id are required");
+      }
+      const linkId = await addMilestoneItem({
+        milestoneId: args.milestone_id,
+        itemType: args.item_type,
+        itemId: args.item_id,
+        addedBy: MCP_ASSISTANT_USER_ID,
+        repositoryId: args.repository_id,
+      });
+      return { content: [{ type: "text", text: JSON.stringify({ assigned: true, linkId }, null, 2) }] };
+    }
+
+    if (name === "remove_milestone_item") {
+      if (!args.milestone_id || !args.item_type || !args.item_id) {
+        throw new Error("milestone_id, item_type, and item_id are required");
+      }
+      await removeMilestoneItem({
+        milestoneId: args.milestone_id,
+        itemType: args.item_type,
+        itemId: args.item_id,
+      });
+      return { content: [{ type: "text", text: JSON.stringify({ removed: true }, null, 2) }] };
     }
 
     // ── Workflow Handler ────────────────────────────────────

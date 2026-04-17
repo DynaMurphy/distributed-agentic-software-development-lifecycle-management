@@ -11,6 +11,7 @@ import {
 import { Artifact } from "@/components/create-artifact";
 import { DocumentSkeleton } from "@/components/document-skeleton";
 import { Badge } from "@/components/ui/badge";
+import { useSelectedRepository } from "@/hooks/use-selected-repository";
 import {
   Card,
   CardDescription,
@@ -136,8 +137,12 @@ function DocumentBrowserView({
 }: {
   onSelect: (doc: DocumentSummary) => void;
 }) {
+  const { selectedRepositoryId } = useSelectedRepository();
+  const repoParam = selectedRepositoryId
+    ? `?productId=${selectedRepositoryId}`
+    : "";
   const { data: documents, isLoading } = useSWR<DocumentSummary[]>(
-    "/api/spec-document",
+    `/api/spec-document${repoParam}`,
     fetcher,
   );
 

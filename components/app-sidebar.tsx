@@ -4,295 +4,255 @@ import {
   BookOpenIcon,
   BrainCircuitIcon,
   BugIcon,
-  FileTextIcon,
-  GitBranchIcon,
+  ComponentIcon,
+  FlagIcon,
+  LayoutTemplateIcon,
+  LightbulbIcon,
+  ListTodoIcon,
+  MapIcon,
+  PackageIcon,
   PanelLeftIcon,
-  PenSquareIcon,
-  SparklesIcon,
-  TrashIcon,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import type { User } from "next-auth";
-import { useState } from "react";
-import { toast } from "sonner";
-import { useSWRConfig } from "swr";
-import { unstable_serialize } from "swr/infinite";
-import {
-  getChatHistoryPaginationKey,
-  SidebarHistory,
-} from "@/components/sidebar-history";
-import { SidebarSPLM } from "@/components/sidebar-splm";
+import useSWR from "swr";
+import { useArtifactStack } from "@/hooks/use-artifact";
+import { useSelectedRepository } from "@/hooks/use-selected-repository";
 import { SidebarUserNav } from "@/components/sidebar-user-nav";
-import { useArtifact } from "@/hooks/use-artifact";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  SidebarSeparator,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "./ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { fetcher } from "@/lib/utils";
+
+type NavItem = {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  documentId: string;
+  kind: string;
+  title: string;
+  tooltip: string;
+};
+
+const globalNavItems: NavItem[] = [
+  {
+    label: "Products",
+    icon: PackageIcon,
+    documentId: "repositories-browser",
+    kind: "repository",
+    title: "Products",
+    tooltip: "Product selector & management",
+  },
+  {
+    label: "Skills",
+    icon: BrainCircuitIcon,
+    documentId: "skills-browser",
+    kind: "skill",
+    title: "Skills Browser",
+    tooltip: "AI skill browser",
+  },
+  {
+    label: "Templates",
+    icon: LayoutTemplateIcon,
+    documentId: "templates-browser",
+    kind: "template",
+    title: "Template Editor",
+    tooltip: "Template editor",
+  },
+];
+
+const productScopedNavItems: NavItem[] = [
+  {
+    label: "Capabilities",
+    icon: ComponentIcon,
+    documentId: "capabilities-browser",
+    kind: "capability",
+    title: "Capabilities",
+    tooltip: "Functional capability areas",
+  },
+  {
+    label: "Milestones",
+    icon: FlagIcon,
+    documentId: "milestones-view",
+    kind: "milestone",
+    title: "Release Milestones",
+    tooltip: "Release checkpoints",
+  },
+  {
+    label: "Roadmap",
+    icon: MapIcon,
+    documentId: "roadmap-view",
+    kind: "roadmap",
+    title: "Product Roadmap",
+    tooltip: "Visual milestone arrangement",
+  },
+  {
+    label: "Features",
+    icon: LightbulbIcon,
+    documentId: "features-browser",
+    kind: "feature",
+    title: "Features",
+    tooltip: "Feature definitions",
+  },
+  {
+    label: "Bugs",
+    icon: BugIcon,
+    documentId: "bugs-browser",
+    kind: "bug",
+    title: "Bugs",
+    tooltip: "Bug reports",
+  },
+  {
+    label: "Backlog",
+    icon: ListTodoIcon,
+    documentId: "backlog-view",
+    kind: "backlog",
+    title: "Product Backlog",
+    tooltip: "Prioritized queue",
+  },
+  {
+    label: "Documents",
+    icon: BookOpenIcon,
+    documentId: "documents-browser",
+    kind: "document",
+    title: "Documents",
+    tooltip: "Specs & documentation",
+  },
+];
 
 export function AppSidebar({ user }: { user: User | undefined }) {
-  const router = useRouter();
   const { open, setOpenMobile, toggleSidebar } = useSidebar();
-  const { setArtifact } = useArtifact();
-  const { mutate } = useSWRConfig();
-  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const { reset, stack } = useArtifactStack();
+  const { selectedRepositoryId } = useSelectedRepository();
 
-  const handleDeleteAll = () => {
-    const deletePromise = fetch("/api/history", {
-      method: "DELETE",
-    });
+  // Fetch product list to display selected product name
+  const { data: products } = useSWR<
+    { id: string; name: string; description: string | null }[]
+  >("/api/products", fetcher, { revalidateOnFocus: false });
 
-    toast.promise(deletePromise, {
-      loading: "Deleting all chats...",
-      success: () => {
-        mutate(unstable_serialize(getChatHistoryPaginationKey));
-        setShowDeleteAllDialog(false);
-        router.replace("/");
-        router.refresh();
-        return "All chats deleted successfully";
-      },
-      error: "Failed to delete all chats",
+  const selectedProduct = products?.find(
+    (r) => r.id === selectedRepositoryId,
+  );
+
+  // Highlight the sidebar item whose nav root matches the stack root
+  const stackRoot = stack.length > 0 ? stack[0] : null;
+
+  const isNavActive = (item: NavItem) =>
+    stackRoot?.documentId === item.documentId ||
+    stackRoot?.kind === item.kind;
+
+  const handleNavClick = (item: NavItem) => {
+    setOpenMobile(false);
+    reset({
+      documentId: item.documentId,
+      kind: item.kind as any,
+      title: item.title,
     });
   };
 
   return (
-    <>
-      <Sidebar
-        className="border-r-0 [&_[data-sidebar=menu-button]]:bg-transparent [&_[data-sidebar=menu-button]]:hover:bg-transparent [&_[data-sidebar=menu-button]]:active:bg-transparent [&_[data-sidebar=menu-button][data-active]]:bg-transparent"
-        collapsible="icon"
-      >
-        <SidebarHeader>
-          <SidebarMenu>
-            <SidebarMenuItem className="flex flex-row items-center justify-between">
-              <div className="group/logo relative">
-                {!open && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <SidebarMenuButton
-                        className="size-8"
-                        onClick={() => toggleSidebar()}
-                      >
-                        <PanelLeftIcon />
-                      </SidebarMenuButton>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">Open sidebar</TooltipContent>
-                  </Tooltip>
-                )}
-              </div>
-              <div className="group-data-[collapsible=icon]:hidden">
-                <SidebarTrigger />
-              </div>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
+    <Sidebar
+      className="border-r-0 [&_[data-sidebar=menu-button]]:bg-transparent [&_[data-sidebar=menu-button]]:hover:bg-transparent [&_[data-sidebar=menu-button]]:active:bg-transparent [&_[data-sidebar=menu-button][data-active]]:bg-transparent"
+      collapsible="icon"
+    >
+      <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem className="flex flex-row items-center justify-between">
+            <div className="group/logo relative">
+              {!open && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <SidebarMenuButton
+                      className="size-8"
+                      onClick={() => toggleSidebar()}
+                    >
+                      <PanelLeftIcon />
+                    </SidebarMenuButton>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Open sidebar</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+            <div className="group-data-[collapsible=icon]:hidden">
+              <SidebarTrigger />
+            </div>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
+
+      <SidebarContent>
+        {/* Global navigation (product-independent) */}
+        <SidebarGroup>
+          <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">
+            Global
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {globalNavItems.map((item) => (
+                <SidebarMenuItem key={item.documentId}>
                   <SidebarMenuButton
-                    onClick={() => {
-                      setOpenMobile(false);
-                      router.push("/");
-                      router.refresh();
-                    }}
-                    tooltip="New Chat"
+                    isActive={isNavActive(item)}
+                    onClick={() => handleNavClick(item)}
+                    tooltip={item.tooltip}
                   >
-                    <PenSquareIcon />
-                    <span>New chat</span>
+                    <item.icon className="h-4 w-4" />
+                    <span>{item.label}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-                {user && (
-                  <SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarSeparator />
+
+        {/* Product-scoped navigation */}
+        <SidebarGroup>
+          <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden pb-2">
+            {selectedProduct
+              ? selectedProduct.name
+              : "No product selected"}
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {user &&
+                productScopedNavItems.map((item) => (
+                  <SidebarMenuItem key={item.documentId}>
                     <SidebarMenuButton
-                      onClick={() => setShowDeleteAllDialog(true)}
-                      tooltip="Delete All Chats"
+                      isActive={isNavActive(item)}
+                      onClick={() => handleNavClick(item)}
+                      tooltip={item.tooltip}
+                      disabled={!selectedRepositoryId}
+                      className={
+                        !selectedRepositoryId
+                          ? "opacity-50 cursor-not-allowed"
+                          : ""
+                      }
                     >
-                      <TrashIcon />
-                      <span>Delete all chats</span>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.label}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                )}
-                {user && (
-                  <>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={() => {
-                          setOpenMobile(false);
-                          setArtifact((current) => ({
-                            ...current,
-                            documentId: "skills-browser",
-                            kind: "skill" as const,
-                            title: "Skills Browser",
-                            content: "",
-                            isVisible: true,
-                            status: "idle",
-                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
-                          }));
-                        }}
-                        tooltip="Skills Browser"
-                      >
-                        <BrainCircuitIcon />
-                        <span>Skills</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={() => {
-                          setOpenMobile(false);
-                          setArtifact((current) => ({
-                            ...current,
-                            documentId: "templates-browser",
-                            kind: "template" as const,
-                            title: "Template Editor",
-                            content: "",
-                            isVisible: true,
-                            status: "idle",
-                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
-                          }));
-                        }}
-                        tooltip="Template Editor"
-                      >
-                        <FileTextIcon />
-                        <span>Templates</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={() => {
-                          setOpenMobile(false);
-                          setArtifact((current) => ({
-                            ...current,
-                            documentId: "documents-browser",
-                            kind: "document" as const,
-                            title: "Documents",
-                            content: "",
-                            isVisible: true,
-                            status: "idle",
-                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
-                          }));
-                        }}
-                        tooltip="Documents"
-                      >
-                        <BookOpenIcon />
-                        <span>Documents</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={() => {
-                          setOpenMobile(false);
-                          setArtifact((current) => ({
-                            ...current,
-                            documentId: "features-browser",
-                            kind: "feature" as const,
-                            title: "Features",
-                            content: "",
-                            isVisible: true,
-                            status: "idle",
-                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
-                          }));
-                        }}
-                        tooltip="Features"
-                      >
-                        <SparklesIcon />
-                        <span>Features</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={() => {
-                          setOpenMobile(false);
-                          setArtifact((current) => ({
-                            ...current,
-                            documentId: "bugs-browser",
-                            kind: "bug" as const,
-                            title: "Bugs",
-                            content: "",
-                            isVisible: true,
-                            status: "idle",
-                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
-                          }));
-                        }}
-                        tooltip="Bugs"
-                      >
-                        <BugIcon />
-                        <span>Bugs</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={() => {
-                          setOpenMobile(false);
-                          setArtifact((current) => ({
-                            ...current,
-                            documentId: "repositories-browser",
-                            kind: "repository" as const,
-                            title: "Repositories",
-                            content: "",
-                            isVisible: true,
-                            status: "idle",
-                            boundingBox: { top: 0, left: 0, width: 0, height: 0 },
-                          }));
-                        }}
-                        tooltip="Repositories"
-                      >
-                        <GitBranchIcon />
-                        <span>Repositories</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  </>
-                )}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-          <SidebarSPLM />
-          <SidebarHistory user={user} />
-        </SidebarContent>
-        <SidebarFooter>{user && <SidebarUserNav user={user} />}</SidebarFooter>
-        <SidebarRail />
-      </Sidebar>
+                ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
 
-      <AlertDialog
-        onOpenChange={setShowDeleteAllDialog}
-        open={showDeleteAllDialog}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete all chats?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete all
-              your chats and remove them from our servers.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteAll}>
-              Delete All
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+      <SidebarFooter>{user && <SidebarUserNav user={user} />}</SidebarFooter>
+      <SidebarRail />
+    </Sidebar>
   );
 }

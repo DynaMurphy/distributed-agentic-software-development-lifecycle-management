@@ -32,8 +32,9 @@ export async function GET(request: Request) {
     const featureType = searchParams.get("featureType") as any;
     const parentId = searchParams.get("parentId") ?? undefined;
     const repositoryId = searchParams.get("repositoryId") ?? undefined;
+    const productId = searchParams.get("productId") ?? undefined;
 
-    const features = await listFeatures({ status, priority, featureType, parentId, repositoryId });
+    const features = await listFeatures({ status, priority, featureType, parentId, repositoryId, productId });
     return Response.json(features, { status: 200 });
   }
 

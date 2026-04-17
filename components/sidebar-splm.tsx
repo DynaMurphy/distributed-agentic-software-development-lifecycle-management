@@ -93,6 +93,31 @@ export function SidebarSPLM() {
         </SidebarGroupLabel>
       </SidebarGroup>
 
+      {/* Milestones */}
+      <SidebarGroup>
+        <SidebarGroupLabel
+          className="cursor-pointer select-none"
+          onClick={() => {
+            setArtifact((current) => ({
+              ...current,
+              documentId: "milestones-view",
+              kind: "milestone" as const,
+              title: "Release Milestones",
+              content: "",
+              isVisible: true,
+              status: "idle",
+              boundingBox: { top: 0, left: 0, width: 0, height: 0 },
+            }));
+            setOpenMobile(false);
+          }}
+        >
+          <span className="flex items-center gap-1.5">
+            <span>🎯</span>
+            <span>Milestones</span>
+          </span>
+        </SidebarGroupLabel>
+      </SidebarGroup>
+
     </>
   );
 }

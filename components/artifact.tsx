@@ -1,11 +1,8 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { formatDistance } from "date-fns";
-import equal from "fast-deep-equal";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  type Dispatch,
   memo,
-  type SetStateAction,
   useCallback,
   useEffect,
   useMemo,
@@ -14,7 +11,6 @@ import {
 } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { useDebounceCallback } from "usehooks-ts";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { backlogArtifact } from "@/artifacts/backlog/client";
 import { bugArtifact } from "@/artifacts/bug/client";
 import { codeArtifact } from "@/artifacts/code/client";
@@ -29,18 +25,18 @@ import { templateArtifact } from "@/artifacts/template/client";
 import { textArtifact } from "@/artifacts/text/client";
 import { capabilityArtifact } from "@/artifacts/capability/client";
 import { roadmapArtifact } from "@/artifacts/roadmap/client";
+import { milestoneArtifact } from "@/artifacts/milestone/client";
 import { useArtifact } from "@/hooks/use-artifact";
-import type { Document, Vote } from "@/lib/db/schema";
-import type { Attachment, ChatMessage } from "@/lib/types";
+import type { Document } from "@/lib/db/schema";
+import type { ChatMessage } from "@/lib/types";
 import { fetcher } from "@/lib/utils";
 import { ArtifactActions } from "./artifact-actions";
-import { ArtifactCloseButton } from "./artifact-close-button";
+import { BreadcrumbBar } from "./breadcrumb-bar";
 import { InlineEditableTitle } from "./inline-editable-title";
-import { RightChatPanel } from "./right-chat-panel";
 import { Toolbar } from "./toolbar";
 import { VersionFooter } from "./version-footer";
 import { VersionHistoryPanel } from "./version-history-panel";
-import type { VisibilityType } from "./visibility-selector";
+
 
 /** Extract "Updated … ago" from SPLM artifact JSON content (bugs, features, backlog). */
 function SplmMetadataLine({ content }: { content: string }) {
@@ -76,6 +72,7 @@ export const artifactDefinitions = [
   documentArtifact,
   capabilityArtifact,
   roadmapArtifact,
+  milestoneArtifact,
 ];
 export type ArtifactKind = (typeof artifactDefinitions)[number]["kind"];
 
@@ -95,43 +92,25 @@ export type UIArtifact = {
 };
 
 function PureArtifact({
-  addToolApprovalResponse,
   chatId,
-  input,
-  setInput,
   status,
   stop,
-  attachments,
-  setAttachments,
   sendMessage,
   messages,
   setMessages,
-  regenerate,
-  votes,
   isReadonly,
-  selectedVisibilityType,
-  selectedModelId,
 }: {
-  addToolApprovalResponse: UseChatHelpers<ChatMessage>["addToolApprovalResponse"];
   chatId: string;
-  input: string;
-  setInput: Dispatch<SetStateAction<string>>;
   status: UseChatHelpers<ChatMessage>["status"];
   stop: UseChatHelpers<ChatMessage>["stop"];
-  attachments: Attachment[];
-  setAttachments: Dispatch<SetStateAction<Attachment[]>>;
   messages: ChatMessage[];
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
-  votes: Vote[] | undefined;
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
-  regenerate: UseChatHelpers<ChatMessage>["regenerate"];
   isReadonly: boolean;
-  selectedVisibilityType: VisibilityType;
-  selectedModelId: string;
 }) {
   const { artifact, setArtifact, metadata, setMetadata } = useArtifact();
 
-  const splmKinds = ["feature", "bug", "backlog", "skill", "template", "repository", "capability"];
+  const splmKinds = ["feature", "bug", "backlog", "skill", "template", "repository", "capability", "roadmap", "milestone"];
   const isSplmArtifact = splmKinds.includes(artifact.kind);
 
   // Guard against invalid / placeholder document IDs ("init", literal "undefined")
@@ -173,7 +152,7 @@ function PureArtifact({
     return documents.at(-1) ?? null;
   }, [documents, currentVersionIndex]);
 
-  const [rightPanelWidth, setRightPanelWidth] = useState(360);
+
 
   useEffect(() => {
     if (documents && documents.length > 0) {
@@ -404,7 +383,6 @@ function PureArtifact({
       ? currentVersionIndex === documents.length - 1
       : true;
 
-  const isMobile = useIsMobile();
 
   const artifactDefinition = artifactDefinitions.find(
     (definition) => definition.kind === artifact.kind
@@ -424,21 +402,22 @@ function PureArtifact({
     }
   }, [artifact.documentId, artifactDefinition, setMetadata, setArtifact]);
 
+  const isVisible = artifact.isVisible;
+
   return (
-    <AnimatePresence>
-      {artifact.isVisible && (
-        <motion.div
-          animate={{ opacity: 1 }}
-          className="absolute inset-0 z-10 flex flex-row overflow-hidden"
-          data-testid="artifact"
-          exit={{ opacity: 0 }}
-          initial={{ opacity: 0 }}
-        >
-          {/* Center content panel */}
-          <div className="relative flex flex-1 flex-col overflow-hidden bg-background dark:bg-muted">
+    <div
+      className={
+        isVisible
+          ? "flex h-dvh w-0 min-w-0 grow shrink overflow-hidden flex-col border-l border-border/50 transition-[width,flex] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+          : "h-dvh w-0 min-w-0 shrink-0 grow-0 overflow-hidden border-l-0 transition-[width,flex] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+      }
+      data-testid="artifact"
+    >
+      {/* Center content panel */}
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background dark:bg-muted">
+            <BreadcrumbBar />
             <div className="flex flex-row items-start justify-between p-2">
               <div className="flex flex-row items-start gap-4">
-                <ArtifactCloseButton />
 
                 <div className="flex flex-col">
                   <InlineEditableTitle
@@ -511,27 +490,37 @@ function PureArtifact({
               )}
             </AnimatePresence>
 
-            <div className="h-full max-w-full! items-center overflow-y-scroll bg-background dark:bg-muted">
-              <artifactDefinition.content
-                key={`${artifact.kind}-${artifact.documentId}`}
-                content={
-                  isCurrentVersion
-                    ? artifact.content
-                    : getDocumentContentById(currentVersionIndex)
-                }
-                currentVersionIndex={currentVersionIndex}
-                getDocumentContentById={getDocumentContentById}
-                isCurrentVersion={isCurrentVersion}
-                isInline={false}
-                isLoading={isDocumentsFetching && !artifact.content}
-                metadata={metadata}
-                mode={mode}
-                onSaveContent={saveContent}
-                setMetadata={setMetadata}
-                status={artifact.status}
-                suggestions={[]}
-                title={artifact.title}
-              />
+            <div className="flex-1 min-h-0 min-w-0 overflow-auto bg-background dark:bg-muted">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={`${artifact.kind}-${artifact.documentId}`}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="h-full"
+                >
+                  <artifactDefinition.content
+                    content={
+                      isCurrentVersion
+                        ? artifact.content
+                        : getDocumentContentById(currentVersionIndex)
+                    }
+                    currentVersionIndex={currentVersionIndex}
+                    getDocumentContentById={getDocumentContentById}
+                    isCurrentVersion={isCurrentVersion}
+                    isInline={false}
+                    isLoading={isDocumentsFetching && !artifact.content}
+                    metadata={metadata}
+                    mode={mode}
+                    onSaveContent={saveContent}
+                    setMetadata={setMetadata}
+                    status={artifact.status}
+                    suggestions={[]}
+                    title={artifact.title}
+                  />
+                </motion.div>
+              </AnimatePresence>
 
               <AnimatePresence>
                 {isCurrentVersion && (
@@ -561,35 +550,7 @@ function PureArtifact({
               )}
             </AnimatePresence>
           </div>
-
-          {/* Right chat panel — desktop only */}
-          {!isMobile && (
-            <RightChatPanel
-              addToolApprovalResponse={addToolApprovalResponse}
-              artifactStatus={artifact.status}
-              attachments={attachments}
-              chatId={chatId}
-              input={input}
-              isCurrentVersion={isCurrentVersion}
-              isReadonly={isReadonly}
-              messages={messages}
-              onPanelWidthChange={setRightPanelWidth}
-              panelWidth={rightPanelWidth}
-              regenerate={regenerate}
-              selectedModelId={selectedModelId}
-              selectedVisibilityType={selectedVisibilityType}
-              sendMessage={sendMessage}
-              setAttachments={setAttachments}
-              setInput={setInput}
-              setMessages={setMessages}
-              status={status}
-              stop={stop}
-              votes={votes}
-            />
-          )}
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </div>
   );
 }
 
@@ -597,16 +558,7 @@ export const Artifact = memo(PureArtifact, (prevProps, nextProps) => {
   if (prevProps.status !== nextProps.status) {
     return false;
   }
-  if (!equal(prevProps.votes, nextProps.votes)) {
-    return false;
-  }
-  if (prevProps.input !== nextProps.input) {
-    return false;
-  }
   if (prevProps.messages.length !== nextProps.messages.length) {
-    return false;
-  }
-  if (prevProps.selectedVisibilityType !== nextProps.selectedVisibilityType) {
     return false;
   }
 

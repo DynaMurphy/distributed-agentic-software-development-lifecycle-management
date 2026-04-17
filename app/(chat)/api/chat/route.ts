@@ -89,7 +89,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { id, message, messages, selectedChatModel, selectedVisibilityType, liveSpecContext: liveSpecBody } =
+    const { id, message, messages, selectedChatModel, selectedVisibilityType, liveSpecContext: liveSpecBody, navigationContext } =
       requestBody;
 
     const session = await auth();
@@ -186,12 +186,17 @@ export async function POST(request: Request) {
         : `\n\n**Currently Open Specification Document (ID: ${liveSpecDocumentId}):**\nThe user is currently editing a specification document in the editor. Below is its current content (including any unsaved edits). Refer to this when discussing or editing the document.\n\nIMPORTANT: Do NOT use \`createDocument\` — a document is already open. Use \`editSpec\` for targeted changes, \`updateSpec\` for major rewrites, or \`readSpec\` to get a fresh view of the content.\n\n---\n${liveSpecMarkdown}\n---\n`
       : "";
 
+    // Build navigation context supplement for the system prompt
+    const navigationContextPrompt = navigationContext
+      ? `\n\n**User Navigation Context:**\nThe user is currently viewing: "${navigationContext.current.title}" (${navigationContext.current.kind})\nNavigation path: ${navigationContext.navigationPath.join(" → ")}\nNavigation depth: ${navigationContext.navigationDepth}\n\nUse this context to provide relevant, contextual assistance. The user may ask questions about what they are currently viewing.\n`
+      : "";
+
     const stream = createUIMessageStream({
       originalMessages: isToolApprovalFlow ? uiMessages : undefined,
       execute: async ({ writer: dataStream }) => {
         const result = streamText({
           model: getLanguageModel(selectedChatModel),
-          system: systemPrompt({ selectedChatModel, requestHints }) + liveDocumentContext,
+          system: systemPrompt({ selectedChatModel, requestHints }) + liveDocumentContext + navigationContextPrompt,
           messages: modelMessages,
           stopWhen: stepCountIs(5),
           experimental_activeTools: isReasoningModel
@@ -385,4 +390,36 @@ export async function DELETE(request: Request) {
   const deletedChat = await deleteChatById({ id });
 
   return Response.json(deletedChat, { status: 200 });
+}
+
+export async function PATCH(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+
+  if (!id) {
+    return new ChatSDKError("bad_request:api").toResponse();
+  }
+
+  const session = await auth();
+
+  if (!session?.user) {
+    return new ChatSDKError("unauthorized:chat").toResponse();
+  }
+
+  const chat = await getChatById({ id });
+
+  if (chat?.userId !== session.user.id) {
+    return new ChatSDKError("forbidden:chat").toResponse();
+  }
+
+  const body = await request.json();
+  const { title } = body;
+
+  if (!title || typeof title !== "string" || title.trim().length === 0) {
+    return new ChatSDKError("bad_request:api").toResponse();
+  }
+
+  await updateChatTitleById({ chatId: id, title: title.trim() });
+
+  return Response.json({ id, title: title.trim() }, { status: 200 });
 }

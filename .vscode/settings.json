@@ -104,6 +104,7 @@
     "/^cat node_modules/@milkdown/kit/package\\.json \\| python3 -c \"import json,sys; d=json\\.load\\(sys\\.stdin\\); \\[print\\(k\\) for k in d\\.get\\('exports',\\{\\}\\)\\.keys\\(\\)\\]\" 2>/dev/null \\| head -20$/": {
       "approve": true,
       "matchCommandLine": true
-    }
+    },
+    "psql": true
   }
 }

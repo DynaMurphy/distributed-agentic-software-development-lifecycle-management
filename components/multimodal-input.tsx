@@ -34,7 +34,7 @@ import {
 } from "@/lib/ai/models";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { useArtifactSelector, useLiveSpecContent } from "@/hooks/use-artifact";
+import { useArtifactSelector, useArtifactStack, useLiveSpecContent } from "@/hooks/use-artifact";
 import {
   PromptInput,
   PromptInputSubmit,
@@ -90,6 +90,7 @@ function PureMultimodalInput({
 
   // Read live spec content and artifact state for AI context injection
   const { liveSpecContent } = useLiveSpecContent();
+  const { stack, current } = useArtifactStack();
   const isSpecVisible = useArtifactSelector(
     useCallback((a) => a.isVisible && a.kind === "spec", [])
   );
@@ -97,17 +98,7 @@ function PureMultimodalInput({
     useCallback((a) => (a.kind === "spec" ? a.documentId : null), [])
   );
 
-  const adjustHeight = useCallback(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "44px";
-    }
-  }, []);
 
-  useEffect(() => {
-    if (textareaRef.current) {
-      adjustHeight();
-    }
-  }, [adjustHeight]);
 
   const hasAutoFocused = useRef(false);
   useEffect(() => {
@@ -120,11 +111,7 @@ function PureMultimodalInput({
     }
   }, [width]);
 
-  const resetHeight = useCallback(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "44px";
-    }
-  }, []);
+
 
   const [localStorageInput, setLocalStorageInput] = useLocalStorage(
     "input",
@@ -137,11 +124,10 @@ function PureMultimodalInput({
       // Prefer DOM value over localStorage to handle hydration
       const finalValue = domValue || localStorageInput || "";
       setInput(finalValue);
-      adjustHeight();
     }
     // Only run once after hydration
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adjustHeight, localStorageInput, setInput]);
+  }, [localStorageInput, setInput]);
 
   useEffect(() => {
     setLocalStorageInput(input);
@@ -177,27 +163,36 @@ function PureMultimodalInput({
 
     // When a spec document is open and has live content, send it as a
     // separate body field so it never appears in the chat bubble or DB.
-    const extraBody =
-      isSpecVisible && liveSpecContent && specDocumentId
-        ? {
-            liveSpecContext: {
-              documentId: specDocumentId,
-              content: liveSpecContent,
-            },
-          }
-        : undefined;
+    const extraBody: Record<string, unknown> = {};
+
+    if (isSpecVisible && liveSpecContent && specDocumentId) {
+      extraBody.liveSpecContext = {
+        documentId: specDocumentId,
+        content: liveSpecContent,
+      };
+    }
+
+    // Send navigation stack context so the AI knows what the user is viewing
+    if (current && stack.length > 0) {
+      extraBody.navigationContext = {
+        current: { documentId: current.documentId, kind: current.kind, title: current.title },
+        navigationPath: stack.map((s) => s.title),
+        navigationDepth: stack.length,
+      };
+    }
+
+    const hasExtraBody = Object.keys(extraBody).length > 0;
 
     sendMessage(
       {
         role: "user",
         parts,
       },
-      extraBody ? { body: extraBody } : undefined,
+      hasExtraBody ? { body: extraBody } : undefined,
     );
 
     setAttachments([]);
     setLocalStorageInput("");
-    resetHeight();
     setInput("");
 
     if (width && width > 768) {
@@ -212,10 +207,11 @@ function PureMultimodalInput({
     setLocalStorageInput,
     width,
     chatId,
-    resetHeight,
     isSpecVisible,
     liveSpecContent,
     specDocumentId,
+    current,
+    stack,
   ]);
 
   const uploadFile = useCallback(async (file: File) => {
@@ -352,7 +348,7 @@ function PureMultimodalInput({
       />
 
       <PromptInput
-        className="rounded-xl border border-border bg-background p-3 shadow-xs transition-all duration-200 focus-within:border-border hover:border-muted-foreground/50"
+        className="rounded-xl border border-border bg-background p-2 shadow-xs transition-all duration-200 focus-within:border-border hover:border-muted-foreground/50"
         onSubmit={(event) => {
           event.preventDefault();
           if (!input.trim() && attachments.length === 0) {
@@ -400,11 +396,10 @@ function PureMultimodalInput({
         )}
         <div className="flex flex-row items-start gap-1 sm:gap-2">
           <PromptInputTextarea
-            className="grow resize-none border-0! border-none! bg-transparent p-2 text-base outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
+            className="min-h-0! max-h-[200px]! grow resize-none border-0! border-none! bg-transparent p-1! text-base outline-none ring-0 [-ms-overflow-style:none] [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden"
             data-testid="multimodal-input"
-            disableAutoResize={true}
             maxHeight={200}
-            minHeight={44}
+            minHeight={24}
             onChange={handleInput}
             placeholder="Send a message..."
             ref={textareaRef}

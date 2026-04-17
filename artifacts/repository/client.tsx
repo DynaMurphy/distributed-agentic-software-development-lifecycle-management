@@ -5,8 +5,8 @@ import useSWR, { useSWRConfig } from "swr";
 import { toast } from "sonner";
 import {
   CheckIcon,
-  GitBranchIcon,
   GlobeIcon,
+  PackageIcon,
   PencilIcon,
   PlusIcon,
   XIcon,
@@ -70,7 +70,7 @@ function CreateRepoForm({
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {
-      toast.error("Please enter a repository name.");
+      toast.error("Please enter a product name.");
       return;
     }
     setIsSubmitting(true);
@@ -88,10 +88,10 @@ function CreateRepoForm({
       });
       if (!res.ok) throw new Error("Failed to create repository");
       setSelectedRepositoryId(id);
-      toast.success("Repository created!");
+      toast.success("Product created!");
       onCreated();
     } catch {
-      toast.error("Failed to create repository.");
+      toast.error("Failed to create product.");
     } finally {
       setIsSubmitting(false);
     }
@@ -106,7 +106,7 @@ function CreateRepoForm({
             autoFocus
             type="text"
             className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary/30 placeholder:text-muted-foreground"
-            placeholder="Repository name"
+            placeholder="Product name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={isSubmitting}
@@ -177,27 +177,25 @@ function EditRepoForm({
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {
-      toast.error("Repository name is required.");
+      toast.error("Product name is required.");
       return;
     }
     setIsSubmitting(true);
     try {
-      const res = await fetch(`/api/repositories?id=${repo.id}`, {
+      const res = await fetch(`/api/products?id=${repo.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: trimmed,
-          fullName: fullName.trim() || undefined,
-          githubUrl: githubUrl.trim() || undefined,
           description: description.trim() || undefined,
           status,
         }),
       });
-      if (!res.ok) throw new Error("Failed to update repository");
-      toast.success("Repository updated!");
+      if (!res.ok) throw new Error("Failed to update product");
+      toast.success("Product updated!");
       onSaved();
     } catch {
-      toast.error("Failed to update repository.");
+      toast.error("Failed to update product.");
     } finally {
       setIsSubmitting(false);
     }
@@ -211,7 +209,7 @@ function EditRepoForm({
             autoFocus
             type="text"
             className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary/30 placeholder:text-muted-foreground"
-            placeholder="Repository name"
+            placeholder="Product name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={isSubmitting}
@@ -315,16 +313,16 @@ function RepositoriesBrowserView() {
       {/* Header */}
       <div className="flex items-center justify-between border-b px-6 py-4">
         <div className="flex items-center gap-3">
-          <GitBranchIcon className="size-5" />
+          <PackageIcon className="size-5" />
           <div>
-            <h2 className="text-lg font-semibold">Repositories</h2>
+            <h2 className="text-lg font-semibold">Products</h2>
             <p className="text-xs text-muted-foreground">
-              Manage code repositories
+              Manage products & linked repositories
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="secondary">{repositories?.length ?? 0} repos</Badge>
+          <Badge variant="secondary">{repositories?.length ?? 0} products</Badge>
           <Button size="sm" onClick={() => setIsCreating(true)}>
             <PlusIcon className="mr-1.5 size-3.5" />
             New
@@ -375,8 +373,8 @@ function RepositoriesBrowserView() {
 
           {filtered.length === 0 && !isCreating ? (
             <div className="col-span-full flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <GitBranchIcon className="mb-3 size-12 opacity-30" />
-              <p>No repositories found</p>
+              <PackageIcon className="mb-3 size-12 opacity-30" />
+              <p>No products found</p>
               <Button
                 variant="outline"
                 size="sm"
@@ -384,7 +382,7 @@ function RepositoriesBrowserView() {
                 onClick={() => setIsCreating(true)}
               >
                 <PlusIcon className="mr-1.5 size-3.5" />
-                Create Repository
+                Create Product
               </Button>
             </div>
           ) : (
@@ -396,6 +394,7 @@ function RepositoriesBrowserView() {
                   onSaved={() => {
                     setEditingId(null);
                     mutate("/api/repositories");
+                    mutate("/api/products");
                   }}
                   onCancel={() => setEditingId(null)}
                 />
@@ -476,7 +475,7 @@ export const repositoryArtifact = new Artifact<
   RepositoryArtifactMetadata
 >({
   kind: "repository",
-  description: "Repository browser and management.",
+  description: "Product browser and management.",
 
   initialize: ({ setMetadata }) => {
     setMetadata({ editingRepoId: null });

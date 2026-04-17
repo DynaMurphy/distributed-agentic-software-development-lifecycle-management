@@ -26,7 +26,8 @@ export async function GET(request: Request) {
   if (!id) {
     // List all current spec documents
     const repositoryId = searchParams.get("repositoryId") ?? undefined;
-    const documents = await listBitemporalDocuments({ repositoryId });
+    const productId = searchParams.get("productId") ?? undefined;
+    const documents = await listBitemporalDocuments({ repositoryId, productId });
     return Response.json(documents, { status: 200 });
   }
 

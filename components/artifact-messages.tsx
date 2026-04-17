@@ -18,6 +18,7 @@ type ArtifactMessagesProps = {
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
   isReadonly: boolean;
   artifactStatus: UIArtifact["status"];
+  className?: string;
 };
 
 function PureArtifactMessages({
@@ -29,6 +30,7 @@ function PureArtifactMessages({
   setMessages,
   regenerate,
   isReadonly,
+  className,
 }: ArtifactMessagesProps) {
   const {
     containerRef: messagesContainerRef,
@@ -42,7 +44,7 @@ function PureArtifactMessages({
 
   return (
     <div
-      className="flex h-full flex-col items-center gap-4 overflow-y-scroll px-4 pt-20"
+      className={`flex h-full flex-col items-center gap-4 overflow-y-scroll px-4 pt-20 ${className ?? ""}`}
       ref={messagesContainerRef}
     >
       {messages.map((message, index) => (
