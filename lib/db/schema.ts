@@ -3,13 +3,17 @@ import {
   boolean,
   foreignKey,
   json,
-  pgTable,
+  pgSchema,
   primaryKey,
   text,
   timestamp,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+
+export const splmSchema = pgSchema("splm");
+
+const pgTable = splmSchema.table;
 
 export const user = pgTable("User", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),

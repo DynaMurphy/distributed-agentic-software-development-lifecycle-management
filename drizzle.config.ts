@@ -9,6 +9,7 @@ export default defineConfig({
   schema: "./lib/db/schema.ts",
   out: "./lib/db/migrations",
   dialect: "postgresql",
+  schemaFilter: ["splm"],
   dbCredentials: {
     // biome-ignore lint: Forbidden non-null assertion.
     url: process.env.SPLM_POSTGRES_URL || process.env.POSTGRES_URL!,

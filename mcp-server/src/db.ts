@@ -32,7 +32,7 @@ const pool = new Pool(connectionConfig);
 
 // Ensure search_path includes splm schema on every new connection
 pool.on('connect', (client) => {
-  client.query('SET search_path TO splm, public');
+  client.query('SET search_path TO splm');
 });
 
 export const query = (text: string, params?: any[]) => pool.query(text, params);
