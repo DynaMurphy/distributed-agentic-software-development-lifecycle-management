@@ -122,5 +122,22 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  return signIn("guest", { redirect: true, redirectTo: redirectUrl });
+  try {
+    return await signIn("guest", { redirect: true, redirectTo: redirectUrl });
+  } catch (error: unknown) {
+    // Auth.js v5 throws NEXT_REDIRECT for successful sign-ins; re-throw so Next.js handles it
+    if (
+      error instanceof Error &&
+      "digest" in error &&
+      typeof (error as any).digest === "string" &&
+      (error as any).digest.startsWith("NEXT_REDIRECT")
+    ) {
+      throw error;
+    }
+
+    console.error("[guest-auth] signIn failed:", error);
+    return new Response("Guest sign-in failed. Please try again later.", {
+      status: 500,
+    });
+  }
 }
