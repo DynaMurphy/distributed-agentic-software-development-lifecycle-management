@@ -3,8 +3,10 @@ import "server-only";
 import postgres from "postgres";
 import { ChatSDKError } from "../errors";
 
+// SPLM document queries use the splm schema on Supabase.
+// Falls back to POSTGRES_URL for backward compatibility.
 // biome-ignore lint: Forbidden non-null assertion.
-const client = postgres(process.env.POSTGRES_URL!);
+const client = postgres(process.env.SPLM_POSTGRES_URL || process.env.POSTGRES_URL!);
 
 /**
  * Shape of a row from the bitemporal `documents` / `current_documents` view.

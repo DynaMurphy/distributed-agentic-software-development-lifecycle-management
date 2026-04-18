@@ -10,7 +10,9 @@ const __dirname = path.dirname(__filename);
 dotenv.config();
 dotenv.config({ path: path.join(__dirname, '../../.env.local') });
 
-const connString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+// SPLM work-item queries use the splm schema on Supabase.
+// Falls back to POSTGRES_URL / DATABASE_URL for backward compatibility.
+const connString = process.env.SPLM_POSTGRES_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL;
 const isLocalhost = connString?.includes('localhost') || connString?.includes('127.0.0.1');
 
 const connectionConfig = connString
@@ -27,6 +29,11 @@ const connectionConfig = connString
     };
 
 const pool = new Pool(connectionConfig);
+
+// Ensure search_path includes splm schema on every new connection
+pool.on('connect', (client) => {
+  client.query('SET search_path TO splm, public');
+});
 
 export const query = (text: string, params?: any[]) => pool.query(text, params);
 
