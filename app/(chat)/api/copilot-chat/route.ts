@@ -25,7 +25,7 @@ import {
   type CopilotChatRequest,
 } from "./schema";
 
-export const maxDuration = Number(process.env.MAX_DURATION) || 60;
+export const maxDuration = 300;
 
 /**
  * Map to track active Copilot sessions per chat.
