@@ -8,6 +8,11 @@ config({
 });
 
 const runMigrate = async () => {
+  if (process.env.VERCEL) {
+    console.log("⏭️  Vercel build detected, skipping migrations");
+    process.exit(0);
+  }
+
   const dbUrl = process.env.SPLM_POSTGRES_URL || process.env.POSTGRES_URL;
   if (!dbUrl) {
     console.log("⏭️  Database URL not defined, skipping migrations");
