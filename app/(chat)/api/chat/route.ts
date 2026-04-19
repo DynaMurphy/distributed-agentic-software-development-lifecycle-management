@@ -220,7 +220,7 @@ export async function POST(request: Request) {
           stopWhen: stepCountIs(5),
           experimental_activeTools: isReasoningModel
             ? []
-            : [
+            : ([
                 "getWeather",
                 "createDocument",
                 "updateDocument",
@@ -255,7 +255,7 @@ export async function POST(request: Request) {
                 "listDirectory",
                 "searchCode",
                 "getFileTree",
-              ].filter((t) => !isGuest || !splmMutationTools.includes(t as any)),
+              ] as const).filter((t) => !isGuest || !splmMutationTools.includes(t as any)),
           providerOptions: isReasoningModel
             ? {
                 anthropic: {
