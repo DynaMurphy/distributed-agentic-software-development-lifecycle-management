@@ -47,6 +47,7 @@ import {
   suggestDocumentLinks,
 } from "@/lib/ai/tools/document-linking";
 import { generateSpecFromFeature } from "@/lib/ai/tools/generate-spec-from-feature";
+import { readFileContent, listDirectory, searchCode, getFileTree } from "@/lib/ai/tools/codebase";
 import { isProductionEnvironment } from "@/lib/constants";
 import {
   createStreamId,
@@ -191,6 +192,24 @@ export async function POST(request: Request) {
       ? `\n\n**User Navigation Context:**\nThe user is currently viewing: "${navigationContext.current.title}" (${navigationContext.current.kind}, ID: ${navigationContext.current.documentId})\nNavigation path: ${navigationContext.navigationPath.join(" → ")}\nNavigation depth: ${navigationContext.navigationDepth}\n\nIMPORTANT: The user's questions likely relate to what they are currently viewing. When they say "this feature", "this bug", "this item", etc., they mean the item shown above.\n- For a feature (kind: "feature"), use \`getFeature\` with the ID above, or \`listTasks\` to see its tasks.\n- For a bug (kind: "bug"), use \`getBug\` with the ID above.\n- For a backlog view (kind: "backlog"), use \`viewBacklog\` to see backlog items.\n- For a capability (kind: "capability"), look up the capability's linked features and bugs.\n- For a spec (kind: "spec"), the live spec content may already be provided separately.\n- For a milestone (kind: "milestone"), look up the milestone's items and status.\n\nAlways use the relevant SPLM tools to fetch current data about the viewed item before answering questions about it. Do NOT ask the user which item they mean — you already know from the navigation context.\n`
       : "";
 
+    const isGuest = userType === "guest";
+
+    // SPLM mutation tools that guests cannot use
+    const splmMutationTools = [
+      "createFeature",
+      "updateFeature",
+      "createBug",
+      "updateBug",
+      "createTask",
+      "updateTask",
+      "promoteToBacklog",
+      "triageItem",
+      "linkDocument",
+      "generateSpecFromFeature",
+      "updateSpec",
+      "editSpec",
+    ] as const;
+
     const stream = createUIMessageStream({
       originalMessages: isToolApprovalFlow ? uiMessages : undefined,
       execute: async ({ writer: dataStream }) => {
@@ -231,7 +250,12 @@ export async function POST(request: Request) {
                 "linkDocument",
                 "suggestDocumentLinks",
                 "generateSpecFromFeature",
-              ],
+                // Codebase tools
+                "readFileContent",
+                "listDirectory",
+                "searchCode",
+                "getFileTree",
+              ].filter((t) => !isGuest || !splmMutationTools.includes(t as any)),
           providerOptions: isReasoningModel
             ? {
                 anthropic: {
@@ -269,6 +293,11 @@ export async function POST(request: Request) {
             linkDocument: linkDocumentAI({ session, dataStream }),
             suggestDocumentLinks: suggestDocumentLinks({ session, dataStream }),
             generateSpecFromFeature: generateSpecFromFeature({ session, dataStream }),
+            // Codebase tools
+            readFileContent,
+            listDirectory,
+            searchCode,
+            getFileTree,
           },
           experimental_telemetry: {
             isEnabled: isProductionEnvironment,

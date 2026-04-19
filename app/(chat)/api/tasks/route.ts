@@ -1,4 +1,5 @@
 import { auth } from "@/app/(auth)/auth";
+import { guestWriteGuard } from "@/lib/auth-guard";
 import {
   listTasks,
   getTaskById,
@@ -48,6 +49,8 @@ export async function POST(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:task").toResponse();
   }
+  const guestError = guestWriteGuard(session, "task");
+  if (guestError) return guestError;
 
   try {
     const body = await request.json();
@@ -81,6 +84,8 @@ export async function PATCH(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:task").toResponse();
   }
+  const guestError = guestWriteGuard(session, "task");
+  if (guestError) return guestError;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");

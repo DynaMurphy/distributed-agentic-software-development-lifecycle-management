@@ -1,4 +1,5 @@
 import { auth } from "@/app/(auth)/auth";
+import { guestWriteGuard } from "@/lib/auth-guard";
 import {
   getRoadmapItems,
   updateRoadmapSchedule,
@@ -52,6 +53,8 @@ export async function PATCH(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:feature").toResponse();
   }
+  const guestError = guestWriteGuard(session, "feature");
+  if (guestError) return guestError;
 
   try {
     const body = await request.json();

@@ -26,9 +26,20 @@ export async function getCopilotClient(): Promise<CopilotClient> {
     options.cliUrl = process.env.COPILOT_CLI_URL;
   }
 
-  // Pass GitHub token for Copilot Pro+ auth
+  // Pass GitHub token for Copilot Pro+ auth.
+  // NOTE: Classic PATs (ghp_*) are NOT supported by the Copilot API.
+  // Use an OAuth token from `gh auth token` or let the SDK handle device flow.
   if (process.env.COPILOT_GITHUB_TOKEN) {
-    options.githubToken = process.env.COPILOT_GITHUB_TOKEN;
+    const token = process.env.COPILOT_GITHUB_TOKEN;
+    if (token.startsWith("ghp_")) {
+      console.warn(
+        "[copilot] COPILOT_GITHUB_TOKEN is a classic PAT (ghp_*) which is not supported by the Copilot API. " +
+        "Ignoring it — the SDK will fall back to GitHub CLI auth or device flow. " +
+        "Run `gh auth login` with a Copilot Pro+ account, or remove COPILOT_GITHUB_TOKEN from your env."
+      );
+    } else {
+      options.githubToken = token;
+    }
   }
 
   clientInstance = new CopilotClient(options);

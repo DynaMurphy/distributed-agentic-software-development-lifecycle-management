@@ -1,4 +1,5 @@
 import { auth } from "@/app/(auth)/auth";
+import { guestWriteGuard } from "@/lib/auth-guard";
 import {
   getBitemporalDocumentById,
   getBitemporalDocumentVersions,
@@ -64,6 +65,8 @@ export async function POST(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:document").toResponse();
   }
+  const guestError = guestWriteGuard(session, "document");
+  if (guestError) return guestError;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -115,6 +118,8 @@ export async function PATCH(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:document").toResponse();
   }
+  const guestError = guestWriteGuard(session, "document");
+  if (guestError) return guestError;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");

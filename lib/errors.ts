@@ -120,6 +120,12 @@ export function getMessageByErrorCode(errorCode: ErrorCode): string {
     case "bad_request:document":
       return "The request to create or update the document was invalid. Please check your input and try again.";
 
+    case "forbidden:feature":
+    case "forbidden:bug":
+    case "forbidden:task":
+    case "forbidden:backlog":
+      return "Guest users cannot modify SPLM data. Please sign in with an account to make changes.";
+
     default:
       return "Something went wrong. Please try again later.";
   }

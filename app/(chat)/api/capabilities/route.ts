@@ -1,4 +1,5 @@
 import { auth } from "@/app/(auth)/auth";
+import { guestWriteGuard } from "@/lib/auth-guard";
 import {
   listCapabilities,
   getCapabilityById,
@@ -74,6 +75,8 @@ export async function POST(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:chat").toResponse();
   }
+  const guestError = guestWriteGuard(session, "feature");
+  if (guestError) return guestError;
 
   const body = await request.json();
   const { capabilityId, itemType, itemId } = body;
@@ -102,6 +105,8 @@ export async function DELETE(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:chat").toResponse();
   }
+  const guestError = guestWriteGuard(session, "feature");
+  if (guestError) return guestError;
 
   const { searchParams } = new URL(request.url);
   const linkId = searchParams.get("linkId");
@@ -124,6 +129,8 @@ export async function PUT(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:chat").toResponse();
   }
+  const guestError = guestWriteGuard(session, "feature");
+  if (guestError) return guestError;
 
   const body = await request.json();
   const { id, name, description, sdlc_phase, sort_order, status } = body;

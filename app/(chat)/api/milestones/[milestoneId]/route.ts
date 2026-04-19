@@ -1,4 +1,5 @@
 import { auth } from "@/app/(auth)/auth";
+import { guestWriteGuard } from "@/lib/auth-guard";
 import {
   getMilestoneById,
   updateMilestone,
@@ -53,6 +54,8 @@ export async function PATCH(
   if (!session?.user) {
     return new ChatSDKError("unauthorized:feature").toResponse();
   }
+  const guestError = guestWriteGuard(session, "feature");
+  if (guestError) return guestError;
 
   const { milestoneId } = await params;
 
@@ -116,6 +119,8 @@ export async function POST(
   if (!session?.user) {
     return new ChatSDKError("unauthorized:feature").toResponse();
   }
+  const guestError = guestWriteGuard(session, "feature");
+  if (guestError) return guestError;
 
   const { milestoneId } = await params;
 

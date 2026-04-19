@@ -1,4 +1,5 @@
 import { auth } from "@/app/(auth)/auth";
+import { guestWriteGuard } from "@/lib/auth-guard";
 import { listProducts, getProductById, updateProduct } from "@/lib/db/bitemporal-work-items";
 import { ChatSDKError } from "@/lib/errors";
 
@@ -39,6 +40,8 @@ export async function PATCH(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:chat").toResponse();
   }
+  const guestError = guestWriteGuard(session, "feature");
+  if (guestError) return guestError;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");

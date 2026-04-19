@@ -187,7 +187,30 @@ export async function POST(request: Request) {
             clearTimeout(idleTimer);
             clearTimeout(absoluteTimer);
             console.error("Copilot session error:", event.data);
-            reject(new Error(`Copilot session error: ${JSON.stringify(event.data)}`));
+
+            // Provide user-friendly messages for common errors
+            const errMsg = event.data?.message ?? "";
+            const statusCode = event.data?.statusCode;
+            let userMessage: string;
+
+            if (
+              errMsg.includes("Personal Access Tokens are not supported") ||
+              errMsg.includes("not created with authentication info") ||
+              event.data?.errorType === "authentication"
+            ) {
+              userMessage =
+                "Copilot authentication failed. Classic Personal Access Tokens (ghp_*) are not supported by the Copilot API. " +
+                "Please authenticate using the GitHub CLI: run `gh auth login` with a Copilot Pro+ account, " +
+                "then remove COPILOT_GITHUB_TOKEN from your .env.local (or set it to the output of `gh auth token`).";
+            } else if (statusCode === 401 || statusCode === 403) {
+              userMessage =
+                "Copilot authorization failed. Ensure your GitHub account has an active Copilot Pro+ subscription " +
+                "and that you are authenticated via `gh auth login`.";
+            } else {
+              userMessage = `Copilot session error: ${errMsg || JSON.stringify(event.data)}`;
+            }
+
+            reject(new Error(userMessage));
           });
 
           // Reset idle timer on any activity
@@ -418,6 +441,23 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof ChatSDKError) {
       return error.toResponse();
+    }
+    // Surface auth errors clearly
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (
+      errorMessage.includes("Personal Access Tokens") ||
+      errorMessage.includes("authentication") ||
+      errorMessage.includes("not created with authentication info")
+    ) {
+      console.error("[copilot] Authentication error:", errorMessage);
+      return Response.json(
+        {
+          error:
+            "Copilot authentication failed. Classic PATs (ghp_*) are not supported. " +
+            "Run `gh auth login` with a Copilot Pro+ account, or set COPILOT_GITHUB_TOKEN to the output of `gh auth token`.",
+        },
+        { status: 401 }
+      );
     }
     console.error("Copilot chat error:", error);
     return new ChatSDKError("offline:chat").toResponse();

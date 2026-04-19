@@ -1,4 +1,5 @@
 import { auth } from "@/app/(auth)/auth";
+import { guestWriteGuard } from "@/lib/auth-guard";
 import {
   getBacklog,
   promoteToBacklog,
@@ -51,6 +52,8 @@ export async function POST(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:backlog").toResponse();
   }
+  const guestError = guestWriteGuard(session, "backlog");
+  if (guestError) return guestError;
 
   try {
     const body = await request.json();
@@ -86,6 +89,8 @@ export async function PATCH(request: Request) {
   if (!session?.user) {
     return new ChatSDKError("unauthorized:backlog").toResponse();
   }
+  const guestError = guestWriteGuard(session, "backlog");
+  if (guestError) return guestError;
 
   try {
     const body = await request.json();

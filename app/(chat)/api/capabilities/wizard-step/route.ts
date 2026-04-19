@@ -1,4 +1,5 @@
 import { auth } from "@/app/(auth)/auth";
+import { guestWriteGuard } from "@/lib/auth-guard";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { getArtifactModel } from "@/lib/ai/providers";
@@ -59,6 +60,8 @@ export async function POST(request: Request) {
   if (!session?.user?.id) {
     return new Response("Unauthorized", { status: 401 });
   }
+  const guestError = guestWriteGuard(session, "feature");
+  if (guestError) return guestError;
 
   const body = await request.json();
   const {
