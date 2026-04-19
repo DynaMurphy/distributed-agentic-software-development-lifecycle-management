@@ -933,7 +933,7 @@ flowchart TD
 
     subgraph "Layer 4: SQL Definitions (Medium Effort)"
         Q1["database/splm-schema.sql"]
-        Q2["database/migrations/*.sql"]
+        Q2["database/consolidated-splm-setup.sql"]
         Q3["PL/pgSQL functions"]
     end
 
@@ -967,7 +967,7 @@ This means:
 | `lib/db/index.ts` | Add `SET search_path TO splm` after connection | 1 line |
 | `mcp-server/src/db.ts` | Add `SET search_path TO splm` after pool connect | 1 line |
 | `database/splm-schema.sql` | Add `CREATE SCHEMA IF NOT EXISTS splm; SET search_path TO splm;` at top | 2 lines |
-| `database/migrations/*.sql` | Add `SET search_path TO splm;` at top of each | 1 line each |
+| `database/consolidated-splm-setup.sql` | Full schema with `SET search_path TO splm;` | Already done |
 | Drizzle migrations | Regenerate after schema change | Auto |
 
 **Total effort with `search_path` approach: ~2-3 hours** (vs 6-8 hours for full prefixing).

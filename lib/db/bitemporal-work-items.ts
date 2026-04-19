@@ -6,7 +6,8 @@ import { ChatSDKError } from "../errors";
 // SPLM work-item queries use the splm schema on Supabase.
 // Falls back to POSTGRES_URL for backward compatibility.
 // biome-ignore lint: Forbidden non-null assertion.
-const client = postgres(process.env.SPLM_POSTGRES_URL || process.env.POSTGRES_URL!);
+const dbUrl = process.env.SPLM_POSTGRES_URL || process.env.POSTGRES_URL!;
+const client = postgres(dbUrl);
 
 /**
  * Safely serialize a value for JSONB storage.
@@ -283,7 +284,7 @@ export async function listProducts(filters?: {
   try {
     let query = `
       SELECT DISTINCT ON (id) id, version_id, name, description, status, valid_from
-      FROM current_products
+      FROM splm.current_products
     `;
     const conditions: string[] = [];
     if (filters?.status) conditions.push(`status = '${filters.status}'`);
@@ -294,6 +295,7 @@ export async function listProducts(filters?: {
     const rows = await client.unsafe(query);
     return rows as unknown as BitemporalProductSummary[];
   } catch (_error) {
+    console.error("listProducts error:", _error);
     throw new ChatSDKError("bad_request:database", "Failed to list products");
   }
 }
@@ -302,7 +304,7 @@ export async function getProductById(id: string): Promise<BitemporalProduct | nu
   try {
     const rows = await client`
       SELECT id, version_id, name, description, status, settings, maintained_by, valid_from, valid_to
-      FROM current_products
+      FROM splm.current_products
       WHERE id = ${id}
       ORDER BY valid_from DESC
       LIMIT 1
@@ -324,7 +326,7 @@ export async function createProduct(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT insert_product_version(
+      SELECT splm.insert_product_version(
         ${params.id}::uuid,
         ${params.name}::varchar,
         ${params.description ?? null}::text,
@@ -350,7 +352,7 @@ export async function updateProduct(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT update_product_version(
+      SELECT splm.update_product_version(
         ${params.id}::uuid,
         ${params.name ?? null}::varchar,
         ${params.description ?? null}::text,
@@ -376,7 +378,7 @@ export async function listRepositories(filters?: {
   try {
     let query = `
       SELECT DISTINCT ON (id) id, version_id, name, full_name, status, valid_from
-      FROM current_repositories
+      FROM splm.current_repositories
     `;
     const conditions: string[] = [];
     if (filters?.status) conditions.push(`status = '${filters.status}'`);
@@ -387,6 +389,7 @@ export async function listRepositories(filters?: {
     const rows = await client.unsafe(query);
     return rows as unknown as BitemporalRepositorySummary[];
   } catch (_error) {
+    console.error("listRepositories error:", _error);
     throw new ChatSDKError("bad_request:database", "Failed to list repositories");
   }
 }
@@ -396,7 +399,7 @@ export async function getRepositoryById(id: string): Promise<BitemporalRepositor
     const rows = await client`
       SELECT id, version_id, name, full_name, description, github_url, default_branch,
              status, settings, maintained_by, valid_from, valid_to
-      FROM current_repositories
+      FROM splm.current_repositories
       WHERE id = ${id}
       ORDER BY valid_from DESC
       LIMIT 1
@@ -421,7 +424,7 @@ export async function createRepository(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT insert_repository_version(
+      SELECT splm.insert_repository_version(
         ${params.id}::uuid,
         ${params.name}::varchar,
         ${params.fullName ?? null}::varchar,
@@ -453,7 +456,7 @@ export async function updateRepository(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT update_repository_version(
+      SELECT splm.update_repository_version(
         ${params.id}::uuid,
         ${params.name ?? null}::varchar,
         ${params.fullName ?? null}::varchar,
@@ -487,7 +490,7 @@ export async function listFeatures(filters?: {
   try {
     let query = `
       SELECT DISTINCT ON (id) id, version_id, title, feature_type, status, priority, repository_id, product_id, valid_from
-      FROM current_features
+      FROM splm.current_features
     `;
     const conditions: string[] = [];
     if (filters?.status) conditions.push(`status = '${filters.status}'`);
@@ -555,18 +558,18 @@ export async function getRoadmapItems(filters?: {
         f.parent_id, f.repository_id, f.primary_capability_id,
         c.name AS capability_name,
         c.id AS capability_id,
-        (SELECT COUNT(*)::int FROM current_tasks t WHERE t.parent_id = f.id AND t.valid_to = 'infinity') AS task_total,
-        (SELECT COUNT(*)::int FROM current_tasks t WHERE t.parent_id = f.id AND t.valid_to = 'infinity' AND t.status = 'done') AS task_done,
+        (SELECT COUNT(*)::int FROM splm.current_tasks t WHERE t.parent_id = f.id AND t.valid_to = 'infinity') AS task_total,
+        (SELECT COUNT(*)::int FROM splm.current_tasks t WHERE t.parent_id = f.id AND t.valid_to = 'infinity' AND t.status = 'done') AS task_done,
         ms.id AS milestone_id,
         ms.title AS milestone_title,
         ms.version_label AS milestone_version_label,
         ms.release_type AS milestone_release_type,
         ms.target_date AS milestone_target_date
-      FROM current_features f
-      LEFT JOIN current_capability_items ci ON ci.item_id = f.id AND ci.item_type = 'feature' AND ci.valid_to = 'infinity'
-      LEFT JOIN current_capabilities c ON c.id = ci.capability_id AND c.valid_to = 'infinity'
-      LEFT JOIN milestone_items mi_f ON mi_f.item_id = f.id AND mi_f.item_type = 'feature'
-      LEFT JOIN current_milestones ms ON ms.id = mi_f.milestone_id
+      FROM splm.current_features f
+      LEFT JOIN splm.current_capability_items ci ON ci.item_id = f.id AND ci.item_type = 'feature' AND ci.valid_to = 'infinity'
+      LEFT JOIN splm.current_capabilities c ON c.id = ci.capability_id AND c.valid_to = 'infinity'
+      LEFT JOIN splm.milestone_items mi_f ON mi_f.item_id = f.id AND mi_f.item_type = 'feature'
+      LEFT JOIN splm.current_milestones ms ON ms.id = mi_f.milestone_id
       WHERE f.valid_to = 'infinity'
         AND f.feature_type = 'feature'
         AND f.status NOT IN ('rejected')
@@ -623,8 +626,8 @@ export async function getFeatureById(id: string): Promise<BitemporalFeature | nu
       SELECT f.id, f.version_id, f.title, f.description, f.feature_type, f.parent_id, f.status, f.priority,
              f.effort_estimate, f.created_by, f.assigned_to, f.tags, f.ai_metadata, f.maintained_by,
              u.email AS maintained_by_email, f.valid_from, f.valid_to
-      FROM current_features f
-      LEFT JOIN "User" u ON f.maintained_by = u.id
+      FROM splm.current_features f
+      LEFT JOIN splm."User" u ON f.maintained_by = u.id
       WHERE f.id = ${id}
       ORDER BY f.valid_from DESC
       LIMIT 1
@@ -642,8 +645,8 @@ export async function getFeatureVersions(id: string): Promise<BitemporalFeature[
       SELECT f.id, f.version_id, f.title, f.description, f.feature_type, f.parent_id, f.status, f.priority,
              f.effort_estimate, f.created_by, f.assigned_to, f.tags, f.ai_metadata, f.maintained_by,
              u.email AS maintained_by_email, f.valid_from, f.valid_to
-      FROM features f
-      LEFT JOIN "User" u ON f.maintained_by = u.id
+      FROM splm.features f
+      LEFT JOIN splm."User" u ON f.maintained_by = u.id
       WHERE f.id = ${id}
       ORDER BY f.valid_from ASC
     `;
@@ -664,7 +667,7 @@ export async function restoreFeatureVersion(featureId: string, versionId: string
     const rows = await client`
       SELECT id, title, description, feature_type, parent_id, status, priority,
              effort_estimate, assigned_to, tags, ai_metadata
-      FROM features
+      FROM splm.features
       WHERE id = ${featureId} AND version_id = ${versionId}
       LIMIT 1
     `;
@@ -674,7 +677,7 @@ export async function restoreFeatureVersion(featureId: string, versionId: string
     const v = rows[0];
     // Create a new current version using update_feature_version
     const result = await client`
-      SELECT update_feature_version(
+      SELECT splm.update_feature_version(
         ${featureId}::uuid,
         ${v.title}::varchar,
         ${v.description}::text,
@@ -701,7 +704,7 @@ export async function getSubFeatures(parentId: string): Promise<BitemporalFeatur
   try {
     const rows = await client`
       SELECT DISTINCT ON (id) id, version_id, title, feature_type, status, priority, valid_from
-      FROM current_features
+      FROM splm.current_features
       WHERE parent_id = ${parentId}
       ORDER BY id, valid_from DESC
     `;
@@ -730,7 +733,7 @@ export async function createFeature(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT insert_feature_version(
+      SELECT splm.insert_feature_version(
         ${params.id}::uuid,
         ${params.title}::varchar,
         ${params.description ?? null}::text,
@@ -749,10 +752,10 @@ export async function createFeature(params: {
     `;
     const versionId = rows[0].version_id as string;
     if (params.repositoryId) {
-      await client`UPDATE features SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
+      await client`UPDATE splm.features SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
     }
     if (params.productId) {
-      await client`UPDATE features SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
+      await client`UPDATE splm.features SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
     }
     return versionId;
   } catch (_error) {
@@ -780,7 +783,7 @@ export async function updateFeature(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT update_feature_version(
+      SELECT splm.update_feature_version(
         ${params.id}::uuid,
         ${params.title ?? null}::varchar,
         ${params.description ?? null}::text,
@@ -821,7 +824,7 @@ export async function listBugs(filters?: {
   try {
     let query = `
       SELECT DISTINCT ON (id) id, version_id, title, severity, status, priority, repository_id, product_id, valid_from
-      FROM current_bugs
+      FROM splm.current_bugs
     `;
     const conditions: string[] = [];
     if (filters?.status) conditions.push(`status = '${filters.status}'`);
@@ -849,8 +852,8 @@ export async function getBugById(id: string): Promise<BitemporalBug | null> {
              b.steps_to_reproduce, b.expected_behavior, b.actual_behavior, b.environment,
              b.created_by, b.assigned_to, b.tags, b.ai_metadata, b.maintained_by,
              u.email AS maintained_by_email, b.valid_from, b.valid_to
-      FROM current_bugs b
-      LEFT JOIN "User" u ON b.maintained_by = u.id
+      FROM splm.current_bugs b
+      LEFT JOIN splm."User" u ON b.maintained_by = u.id
       WHERE b.id = ${id}
       ORDER BY b.valid_from DESC
       LIMIT 1
@@ -869,8 +872,8 @@ export async function getBugVersions(id: string): Promise<BitemporalBug[]> {
              b.steps_to_reproduce, b.expected_behavior, b.actual_behavior, b.environment,
              b.created_by, b.assigned_to, b.tags, b.ai_metadata, b.maintained_by,
              u.email AS maintained_by_email, b.valid_from, b.valid_to
-      FROM bugs b
-      LEFT JOIN "User" u ON b.maintained_by = u.id
+      FROM splm.bugs b
+      LEFT JOIN splm."User" u ON b.maintained_by = u.id
       WHERE b.id = ${id}
       ORDER BY b.valid_from ASC
     `;
@@ -901,7 +904,7 @@ export async function createBug(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT insert_bug_version(
+      SELECT splm.insert_bug_version(
         ${params.id}::uuid,
         ${params.title}::varchar,
         ${params.description ?? null}::text,
@@ -922,10 +925,10 @@ export async function createBug(params: {
     `;
     const versionId = rows[0].version_id as string;
     if (params.repositoryId) {
-      await client`UPDATE bugs SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
+      await client`UPDATE splm.bugs SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
     }
     if (params.productId) {
-      await client`UPDATE bugs SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
+      await client`UPDATE splm.bugs SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
     }
     return versionId;
   } catch (_error) {
@@ -951,7 +954,7 @@ export async function updateBug(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT update_bug_version(
+      SELECT splm.update_bug_version(
         ${params.id}::uuid,
         ${params.title ?? null}::varchar,
         ${params.description ?? null}::text,
@@ -982,7 +985,7 @@ export async function restoreBugVersion(bugId: string, versionId: string): Promi
       SELECT id, title, description, severity, status, priority,
              steps_to_reproduce, expected_behavior, actual_behavior, environment,
              assigned_to, tags, ai_metadata
-      FROM bugs
+      FROM splm.bugs
       WHERE id = ${bugId} AND version_id = ${versionId}
       LIMIT 1
     `;
@@ -992,7 +995,7 @@ export async function restoreBugVersion(bugId: string, versionId: string): Promi
     const v = rows[0];
     // Create a new current version using update_bug_version
     const result = await client`
-      SELECT update_bug_version(
+      SELECT splm.update_bug_version(
         ${bugId}::uuid,
         ${v.title}::varchar,
         ${v.description}::text,
@@ -1031,7 +1034,7 @@ export async function listTasks(filters?: {
   try {
     let query = `
       SELECT DISTINCT ON (id) id, version_id, title, parent_type, parent_id, status, priority, repository_id, product_id, valid_from
-      FROM current_tasks
+      FROM splm.current_tasks
     `;
     const conditions: string[] = [];
     if (filters?.parentType) conditions.push(`parent_type = '${filters.parentType}'`);
@@ -1057,7 +1060,7 @@ export async function getTaskById(id: string): Promise<BitemporalTask | null> {
     const rows = await client`
       SELECT id, version_id, title, description, parent_type, parent_id, status, priority,
              effort_estimate, assigned_to, tags, ai_metadata, valid_from, valid_to
-      FROM current_tasks
+      FROM splm.current_tasks
       WHERE id = ${id}
       ORDER BY valid_from DESC
       LIMIT 1
@@ -1087,7 +1090,7 @@ export async function createTask(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT insert_task_version(
+      SELECT splm.insert_task_version(
         ${params.id}::uuid,
         ${params.title}::varchar,
         ${params.description ?? null}::text,
@@ -1105,10 +1108,10 @@ export async function createTask(params: {
     `;
     const versionId = rows[0].version_id as string;
     if (params.repositoryId) {
-      await client`UPDATE tasks SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
+      await client`UPDATE splm.tasks SET repository_id = ${params.repositoryId}::uuid WHERE version_id = ${versionId}::uuid`;
     }
     if (params.productId) {
-      await client`UPDATE tasks SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
+      await client`UPDATE splm.tasks SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
     }
     return versionId;
   } catch (_error) {
@@ -1130,7 +1133,7 @@ export async function updateTask(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT update_task_version(
+      SELECT splm.update_task_version(
         ${params.id}::uuid,
         ${params.title ?? null}::varchar,
         ${params.description ?? null}::text,
@@ -1203,11 +1206,11 @@ export async function getBacklog(filters?: {
           ) END
         )) FROM (SELECT COALESCE(f.ai_metadata, b.ai_metadata, '{}'::jsonb) AS _m) _sub
         ) AS ai_metadata
-      , (SELECT COUNT(*)::int FROM current_tasks t WHERE t.parent_id = bi.item_id AND t.valid_to = 'infinity') AS task_total
-      , (SELECT COUNT(*)::int FROM current_tasks t WHERE t.parent_id = bi.item_id AND t.valid_to = 'infinity' AND t.status = 'done') AS task_done
-      FROM current_backlog_items bi
-      LEFT JOIN current_features f ON bi.item_type = 'feature' AND bi.item_id = f.id AND f.valid_to = 'infinity'
-      LEFT JOIN current_bugs b ON bi.item_type = 'bug' AND bi.item_id = b.id AND b.valid_to = 'infinity'
+      , (SELECT COUNT(*)::int FROM splm.current_tasks t WHERE t.parent_id = bi.item_id AND t.valid_to = 'infinity') AS task_total
+      , (SELECT COUNT(*)::int FROM splm.current_tasks t WHERE t.parent_id = bi.item_id AND t.valid_to = 'infinity' AND t.status = 'done') AS task_done
+      FROM splm.current_backlog_items bi
+      LEFT JOIN splm.current_features f ON bi.item_type = 'feature' AND bi.item_id = f.id AND f.valid_to = 'infinity'
+      LEFT JOIN splm.current_bugs b ON bi.item_type = 'bug' AND bi.item_id = b.id AND b.valid_to = 'infinity'
       WHERE bi.valid_to = 'infinity'
         AND COALESCE(f.status, b.status) != 'rejected'
     `;
@@ -1236,7 +1239,7 @@ export async function getBacklogItemById(id: string): Promise<BitemporalBacklogI
   try {
     const rows = await client`
       SELECT id, version_id, item_type, item_id, rank, sprint_label, notes, valid_from, valid_to
-      FROM current_backlog_items
+      FROM splm.current_backlog_items
       WHERE id = ${id} AND valid_to = 'infinity'
       ORDER BY valid_from DESC
       LIMIT 1
@@ -1255,7 +1258,7 @@ export async function getBacklogItemByItemId(
   try {
     const rows = await client`
       SELECT id, version_id, item_type, item_id, rank, sprint_label, notes, valid_from, valid_to
-      FROM current_backlog_items
+      FROM splm.current_backlog_items
       WHERE item_type = ${itemType} AND item_id = ${itemId} AND valid_to = 'infinity'
       ORDER BY valid_from DESC
       LIMIT 1
@@ -1287,13 +1290,13 @@ export async function promoteToBacklog(params: {
     let rank = params.rank;
     if (rank === undefined) {
       const maxRankRows = await client`
-        SELECT COALESCE(MAX(rank), 0) + 1 AS next_rank FROM current_backlog_items WHERE valid_to = 'infinity'
+        SELECT COALESCE(MAX(rank), 0) + 1 AS next_rank FROM splm.current_backlog_items WHERE valid_to = 'infinity'
       `;
       rank = maxRankRows[0].next_rank as number;
     }
 
     const rows = await client`
-      SELECT insert_backlog_item_version(
+      SELECT splm.insert_backlog_item_version(
         ${params.id}::uuid,
         ${params.itemType}::varchar,
         ${params.itemId}::uuid,
@@ -1319,7 +1322,7 @@ export async function updateBacklogItem(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT update_backlog_item_version(
+      SELECT splm.update_backlog_item_version(
         ${params.id}::uuid,
         ${params.rank ?? null}::integer,
         ${params.sprintLabel ?? null}::varchar,
@@ -1345,7 +1348,7 @@ export async function bulkUpdateRanks(
   try {
     for (const item of items) {
       await client`
-        SELECT update_backlog_item_version(
+        SELECT splm.update_backlog_item_version(
           ${item.id}::uuid,
           ${item.rank}::integer,
           ${null}::varchar,
@@ -1408,7 +1411,7 @@ export async function linkDocumentToItem(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT insert_item_document_link_version(
+      SELECT splm.insert_item_document_link_version(
         ${params.id}::uuid,
         ${params.itemType}::varchar,
         ${params.itemId}::uuid,
@@ -1427,7 +1430,7 @@ export async function linkDocumentToItem(params: {
 export async function unlinkDocumentFromItem(linkId: string): Promise<void> {
   try {
     await client`
-      SELECT delete_item_document_link(${linkId}::uuid)
+      SELECT splm.delete_item_document_link(${linkId}::uuid)
     `;
   } catch (_error) {
     throw new ChatSDKError("bad_request:database", "Failed to unlink document from item");
@@ -1441,7 +1444,7 @@ export async function getDocumentsForItem(
   try {
     const rows = await client`
       SELECT id, version_id, item_type, item_id, document_id, link_type, valid_from, valid_to
-      FROM current_item_document_links
+      FROM splm.current_item_document_links
       WHERE item_type = ${itemType} AND item_id = ${itemId}
         AND valid_to = 'infinity'
       ORDER BY valid_from DESC
@@ -1458,7 +1461,7 @@ export async function getItemsForDocument(
   try {
     const rows = await client`
       SELECT id, version_id, item_type, item_id, document_id, link_type, valid_from, valid_to
-      FROM current_item_document_links
+      FROM splm.current_item_document_links
       WHERE document_id = ${documentId}
         AND valid_to = 'infinity'
       ORDER BY valid_from DESC
@@ -1478,8 +1481,8 @@ export async function getDocumentLinksWithTitles(
     const rows = await client`
       SELECT l.id, l.version_id, l.item_type, l.item_id, l.document_id, l.link_type,
              l.valid_from, l.valid_to, d.title AS document_title
-      FROM current_item_document_links l
-      JOIN current_documents d ON l.document_id = d.id
+      FROM splm.current_item_document_links l
+      JOIN splm.current_documents d ON l.document_id = d.id
       WHERE l.item_type = ${itemType} AND l.item_id = ${itemId}
         AND l.valid_to = 'infinity'
       ORDER BY l.valid_from DESC
@@ -1556,9 +1559,9 @@ export async function listCapabilities(filters?: {
     } else if (filters?.repositoryId) {
       // Legacy: filter by repository through items
       conditions.push(`EXISTS (
-        SELECT 1 FROM current_capability_items ci_r
-        LEFT JOIN current_features f_r ON ci_r.item_id = f_r.id AND ci_r.item_type = 'feature' AND f_r.valid_to = 'infinity'
-        LEFT JOIN current_bugs b_r ON ci_r.item_id = b_r.id AND ci_r.item_type = 'bug' AND b_r.valid_to = 'infinity'
+        SELECT 1 FROM splm.current_capability_items ci_r
+        LEFT JOIN splm.current_features f_r ON ci_r.item_id = f_r.id AND ci_r.item_type = 'feature' AND f_r.valid_to = 'infinity'
+        LEFT JOIN splm.current_bugs b_r ON ci_r.item_id = b_r.id AND ci_r.item_type = 'bug' AND b_r.valid_to = 'infinity'
         WHERE ci_r.valid_to = 'infinity' AND ci_r.capability_id = c.id
           AND (f_r.repository_id = '${filters.repositoryId}' OR b_r.repository_id = '${filters.repositoryId}')
       )`);
@@ -1576,11 +1579,11 @@ export async function listCapabilities(filters?: {
         ms.version_label AS milestone_version_label,
         ms.release_type AS milestone_release_type,
         ms.target_date AS milestone_target_date
-      FROM current_capabilities c
-      LEFT JOIN current_capability_items ci
+      FROM splm.current_capabilities c
+      LEFT JOIN splm.current_capability_items ci
         ON ci.capability_id = c.id AND ci.valid_to = 'infinity'
-      LEFT JOIN milestone_items mi_c ON mi_c.item_id = c.id AND mi_c.item_type = 'capability'
-      LEFT JOIN current_milestones ms ON ms.id = mi_c.milestone_id
+      LEFT JOIN splm.milestone_items mi_c ON mi_c.item_id = c.id AND mi_c.item_type = 'capability'
+      LEFT JOIN splm.current_milestones ms ON ms.id = mi_c.milestone_id
       WHERE ${conditions.join(" AND ")}
       GROUP BY c.id, c.name, c.sdlc_phase, c.sort_order, c.status,
                c.priority, c.planned_start, c.planned_end, c.roadmap_horizon,
@@ -1597,7 +1600,7 @@ export async function listCapabilities(filters?: {
 export async function getCapabilityById(id: string): Promise<BitemporalCapability | null> {
   try {
     const rows = await client`
-      SELECT * FROM current_capabilities
+      SELECT * FROM splm.current_capabilities
       WHERE id = ${id} AND valid_to = 'infinity'
       ORDER BY valid_from DESC LIMIT 1
     `;
@@ -1615,8 +1618,8 @@ export async function getCapabilityItems(capabilityId: string): Promise<{
   try {
     const featureRows = await client`
       SELECT f.id, f.title, f.status, f.priority, f.feature_type, f.repository_id, f.valid_from
-      FROM current_capability_items ci
-      JOIN current_features f ON ci.item_id = f.id AND f.valid_to = 'infinity'
+      FROM splm.current_capability_items ci
+      JOIN splm.current_features f ON ci.item_id = f.id AND f.valid_to = 'infinity'
       WHERE ci.capability_id = ${capabilityId}
         AND ci.item_type = 'feature'
         AND ci.valid_to = 'infinity'
@@ -1624,8 +1627,8 @@ export async function getCapabilityItems(capabilityId: string): Promise<{
     `;
     const bugRows = await client`
       SELECT b.id, b.title, b.status, b.severity, b.priority
-      FROM current_capability_items ci
-      JOIN current_bugs b ON ci.item_id = b.id AND b.valid_to = 'infinity'
+      FROM splm.current_capability_items ci
+      JOIN splm.current_bugs b ON ci.item_id = b.id AND b.valid_to = 'infinity'
       WHERE ci.capability_id = ${capabilityId}
         AND ci.item_type = 'bug'
         AND ci.valid_to = 'infinity'
@@ -1648,8 +1651,8 @@ export async function getCapabilitiesForItem(
   try {
     const rows = await client`
       SELECT c.id, c.name, c.sdlc_phase, ci.id AS link_id
-      FROM current_capability_items ci
-      JOIN current_capabilities c ON ci.capability_id = c.id AND c.valid_to = 'infinity'
+      FROM splm.current_capability_items ci
+      JOIN splm.current_capabilities c ON ci.capability_id = c.id AND c.valid_to = 'infinity'
       WHERE ci.item_type = ${itemType} AND ci.item_id = ${itemId}
         AND ci.valid_to = 'infinity'
       ORDER BY c.sort_order ASC
@@ -1669,7 +1672,7 @@ export async function assignItemToCapability(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT insert_capability_item_version(
+      SELECT splm.insert_capability_item_version(
         ${crypto.randomUUID()}::uuid,
         ${params.capabilityId}::uuid,
         ${params.itemType}::varchar,
@@ -1687,7 +1690,7 @@ export async function assignItemToCapability(params: {
 /** Unassign an item from a capability (soft-delete) */
 export async function unassignItemFromCapability(linkId: string): Promise<void> {
   try {
-    await client`SELECT delete_capability_item(${linkId}::uuid)`;
+    await client`SELECT splm.delete_capability_item(${linkId}::uuid)`;
   } catch (_error) {
     throw new ChatSDKError("bad_request:database", "Failed to unassign item from capability");
   }
@@ -1705,7 +1708,7 @@ export async function updateCapability(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT update_capability_version(
+      SELECT splm.update_capability_version(
         ${params.id}::uuid,
         ${params.name ?? null}::varchar,
         ${params.description ?? null}::text,
@@ -1729,7 +1732,7 @@ export async function getCapabilityItemsMap(
   try {
     const rows = await client`
       SELECT ci.item_id, ci.capability_id
-      FROM current_capability_items ci
+      FROM splm.current_capability_items ci
       WHERE ci.item_type = ${itemType}
         AND ci.valid_to = 'infinity'
     `;
@@ -1834,19 +1837,19 @@ export async function listMilestones(filters?: {
         CASE WHEN COALESCE(counts.item_count, 0) = 0 THEN 0
              ELSE ROUND(COALESCE(counts.done_count, 0)::numeric / counts.item_count * 100)
         END AS completion_pct
-      FROM current_milestones m
+      FROM splm.current_milestones m
       LEFT JOIN LATERAL (
         SELECT
           COUNT(*) AS item_count,
           COUNT(*) FILTER (WHERE
             CASE
-              WHEN mi.item_type = 'feature' THEN (SELECT f.status FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1) = 'done'
-              WHEN mi.item_type = 'bug' THEN (SELECT b.status FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1) = 'done'
-              WHEN mi.item_type = 'capability' THEN (SELECT c.status FROM current_capabilities c WHERE c.id = mi.item_id LIMIT 1) = 'archived'
+              WHEN mi.item_type = 'feature' THEN (SELECT f.status FROM splm.current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1) = 'done'
+              WHEN mi.item_type = 'bug' THEN (SELECT b.status FROM splm.current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1) = 'done'
+              WHEN mi.item_type = 'capability' THEN (SELECT c.status FROM splm.current_capabilities c WHERE c.id = mi.item_id LIMIT 1) = 'archived'
               ELSE false
             END
           ) AS done_count
-        FROM milestone_items mi
+        FROM splm.milestone_items mi
         WHERE mi.milestone_id = m.id
       ) counts ON true
       ${whereClause}
@@ -1872,19 +1875,19 @@ export async function getMilestoneById(id: string): Promise<MilestoneWithProgres
         CASE WHEN COALESCE(counts.item_count, 0) = 0 THEN 0
              ELSE ROUND(COALESCE(counts.done_count, 0)::numeric / counts.item_count * 100)
         END AS completion_pct
-      FROM current_milestones m
+      FROM splm.current_milestones m
       LEFT JOIN LATERAL (
         SELECT
           COUNT(*) AS item_count,
           COUNT(*) FILTER (WHERE
             CASE
-              WHEN mi.item_type = 'feature' THEN (SELECT f.status FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1) = 'done'
-              WHEN mi.item_type = 'bug' THEN (SELECT b.status FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1) = 'done'
-              WHEN mi.item_type = 'capability' THEN (SELECT c.status FROM current_capabilities c WHERE c.id = mi.item_id LIMIT 1) = 'archived'
+              WHEN mi.item_type = 'feature' THEN (SELECT f.status FROM splm.current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1) = 'done'
+              WHEN mi.item_type = 'bug' THEN (SELECT b.status FROM splm.current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1) = 'done'
+              WHEN mi.item_type = 'capability' THEN (SELECT c.status FROM splm.current_capabilities c WHERE c.id = mi.item_id LIMIT 1) = 'archived'
               ELSE false
             END
           ) AS done_count
-        FROM milestone_items mi
+        FROM splm.milestone_items mi
         WHERE mi.milestone_id = m.id
       ) counts ON true
       WHERE m.id = ${id}
@@ -1918,7 +1921,7 @@ export async function createMilestone(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT insert_milestone_version(
+      SELECT splm.insert_milestone_version(
         ${params.id}::uuid,
         ${params.title}::varchar,
         ${params.description ?? null}::text,
@@ -1939,7 +1942,7 @@ export async function createMilestone(params: {
     `;
     const versionId = rows[0].version_id as string;
     if (params.productId) {
-      await client`UPDATE milestones SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
+      await client`UPDATE splm.milestones SET product_id = ${params.productId}::uuid WHERE version_id = ${versionId}::uuid`;
     }
     return versionId;
   } catch (_error) {
@@ -1965,7 +1968,7 @@ export async function updateMilestone(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      SELECT update_milestone_version(
+      SELECT splm.update_milestone_version(
         ${params.id}::uuid,
         ${params.title ?? null}::varchar,
         ${params.description ?? null}::text,
@@ -1994,21 +1997,21 @@ export async function getMilestoneItems(milestoneId: string): Promise<MilestoneI
     const rows = await client`
       SELECT mi.id, mi.milestone_id, mi.item_type, mi.item_id, mi.added_at, mi.added_by,
         CASE
-          WHEN mi.item_type = 'feature' THEN (SELECT f.title FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
-          WHEN mi.item_type = 'bug' THEN (SELECT b.title FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
-          WHEN mi.item_type = 'capability' THEN (SELECT c.name FROM current_capabilities c WHERE c.id = mi.item_id LIMIT 1)
+          WHEN mi.item_type = 'feature' THEN (SELECT f.title FROM splm.current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'bug' THEN (SELECT b.title FROM splm.current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'capability' THEN (SELECT c.name FROM splm.current_capabilities c WHERE c.id = mi.item_id LIMIT 1)
         END AS item_title,
         CASE
-          WHEN mi.item_type = 'feature' THEN (SELECT f.status FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
-          WHEN mi.item_type = 'bug' THEN (SELECT b.status FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
-          WHEN mi.item_type = 'capability' THEN (SELECT c.status FROM current_capabilities c WHERE c.id = mi.item_id LIMIT 1)
+          WHEN mi.item_type = 'feature' THEN (SELECT f.status FROM splm.current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'bug' THEN (SELECT b.status FROM splm.current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'capability' THEN (SELECT c.status FROM splm.current_capabilities c WHERE c.id = mi.item_id LIMIT 1)
         END AS item_status,
         CASE
-          WHEN mi.item_type = 'feature' THEN (SELECT f.priority FROM current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
-          WHEN mi.item_type = 'bug' THEN (SELECT b.priority FROM current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'feature' THEN (SELECT f.priority FROM splm.current_features f WHERE f.id = mi.item_id ORDER BY f.valid_from DESC LIMIT 1)
+          WHEN mi.item_type = 'bug' THEN (SELECT b.priority FROM splm.current_bugs b WHERE b.id = mi.item_id ORDER BY b.valid_from DESC LIMIT 1)
           WHEN mi.item_type = 'capability' THEN NULL
         END AS item_priority
-      FROM milestone_items mi
+      FROM splm.milestone_items mi
       WHERE mi.milestone_id = ${milestoneId}
       ORDER BY mi.item_type, mi.added_at
     `;
@@ -2028,7 +2031,7 @@ export async function addMilestoneItem(params: {
 }): Promise<string> {
   try {
     const rows = await client`
-      INSERT INTO milestone_items (milestone_id, item_type, item_id, added_by, repository_id, product_id)
+      INSERT INTO splm.milestone_items (milestone_id, item_type, item_id, added_by, repository_id, product_id)
       VALUES (${params.milestoneId}::uuid, ${params.itemType}::varchar, ${params.itemId}::uuid, ${params.addedBy ?? null}::uuid, ${params.repositoryId ?? null}::uuid, ${params.productId ?? null}::uuid)
       ON CONFLICT (milestone_id, item_type, item_id) DO NOTHING
       RETURNING id
@@ -2046,7 +2049,7 @@ export async function removeMilestoneItem(params: {
 }): Promise<void> {
   try {
     await client`
-      DELETE FROM milestone_items
+      DELETE FROM splm.milestone_items
       WHERE milestone_id = ${params.milestoneId}::uuid
         AND item_type = ${params.itemType}::varchar
         AND item_id = ${params.itemId}::uuid

@@ -6,7 +6,8 @@ import { ChatSDKError } from "../errors";
 // SPLM document queries use the splm schema on Supabase.
 // Falls back to POSTGRES_URL for backward compatibility.
 // biome-ignore lint: Forbidden non-null assertion.
-const client = postgres(process.env.SPLM_POSTGRES_URL || process.env.POSTGRES_URL!);
+const dbUrl = process.env.SPLM_POSTGRES_URL || process.env.POSTGRES_URL!;
+const client = postgres(dbUrl);
 
 /**
  * Shape of a row from the bitemporal `documents` / `current_documents` view.
@@ -48,7 +49,7 @@ export async function listBitemporalDocuments(filters?: {
   try {
     let query = `
       SELECT DISTINCT ON (id) id, version_id, title, valid_from, parent_id, sort_order
-      FROM current_documents
+      FROM splm.current_documents
     `;
     const conditions: string[] = [];
     if (filters?.productId) {
@@ -80,8 +81,8 @@ export async function getBitemporalDocumentById(
     const rows = await client`
       SELECT d.id, d.version_id, d.title, d.content, d.valid_from, d.valid_to,
              d.maintained_by, u.email AS maintained_by_email, d.parent_id, d.sort_order
-      FROM current_documents d
-      LEFT JOIN "User" u ON d.maintained_by = u.id
+      FROM splm.current_documents d
+      LEFT JOIN splm."User" u ON d.maintained_by = u.id
       WHERE d.id = ${id}
       ORDER BY d.valid_from DESC
       LIMIT 1
@@ -107,8 +108,8 @@ export async function getBitemporalDocumentVersions(
     const rows = await client`
       SELECT d.id, d.version_id, d.title, d.content, d.valid_from, d.valid_to,
              d.maintained_by, u.email AS maintained_by_email, d.parent_id, d.sort_order
-      FROM documents d
-      LEFT JOIN "User" u ON d.maintained_by = u.id
+      FROM splm.documents d
+      LEFT JOIN splm."User" u ON d.maintained_by = u.id
       WHERE d.id = ${id}
       ORDER BY d.valid_from ASC
     `;
@@ -134,7 +135,7 @@ export async function saveBitemporalDocument(
 ): Promise<string> {
   try {
     const rows = await client`
-      SELECT update_document_version(
+      SELECT splm.update_document_version(
         ${id}::uuid,
         ${title}::varchar,
         ${content}::text,
@@ -160,7 +161,7 @@ export async function updateBitemporalDocumentTitle(
 ): Promise<void> {
   try {
     await client`
-      UPDATE documents
+      UPDATE splm.documents
       SET title = ${title}
       WHERE id = ${id}
     `;
@@ -185,7 +186,7 @@ export async function createBitemporalDocument(
 ): Promise<string> {
   try {
     const rows = await client`
-      SELECT insert_document_version(
+      SELECT splm.insert_document_version(
         ${id}::uuid,
         ${title}::varchar,
         ${content}::text,
@@ -214,7 +215,7 @@ export async function updateBitemporalDocumentMetadata(
 ): Promise<string> {
   try {
     const rows = await client`
-      SELECT update_document_metadata(
+      SELECT splm.update_document_metadata(
         ${id}::uuid,
         ${updates.title ?? null}::varchar,
         ${updates.parentId ?? null}::uuid,

@@ -39,9 +39,6 @@ import { generateHashedPassword } from "./utils";
 
 // biome-ignore lint: Forbidden non-null assertion.
 const dbUrl = process.env.SPLM_POSTGRES_URL || process.env.POSTGRES_URL!;
-if (typeof window === "undefined") {
-  console.log("[db] Using URL host:", new URL(dbUrl).host);
-}
 const client = postgres(dbUrl);
 const db = drizzle(client);
 
